@@ -12,6 +12,7 @@ import {
   ExtractedInvoiceDraftSchema,
   formatPayPalInvoiceV2Payload,
   InvoiceItem,
+  SourceSpan,
 } from "./schema.js";
 import {
   DeterministicExtractor,
@@ -214,6 +215,7 @@ export interface DraftUpdatePatch {
     description?: string;
     quantity: string;
     unitPrice: string;
+    sourceSpan?: SourceSpan | null;
   }>;
 }
 
@@ -461,16 +463,43 @@ export class InvoiceWorkflowService {
 
     if (patch.items !== undefined && patch.items.length > 0) {
       const currCode = nextDraft.currency.value ?? "USD";
-      nextDraft.items = patch.items.map((item, idx): InvoiceItem => ({
-        name: item.name.trim() || `Deliverable ${idx + 1}`,
-        description: item.description?.trim() || undefined,
-        quantity: String(item.quantity).trim() || "1",
-        unit_amount: {
-          currency_code: currCode,
-          value: normalizeAmountString(String(item.unitPrice || "0.00")),
-        },
-        sourceSpan: session.draft.items[idx]?.sourceSpan ?? null,
-      }));
+      nextDraft.items = patch.items.map((item, idx): InvoiceItem => {
+        const cleanName = item.name.trim() || `Deliverable ${idx + 1}`;
+        const cleanQty = String(item.quantity).trim() || "1";
+        const cleanPrice = normalizeAmountString(String(item.unitPrice || "0.00"));
+
+        // Match provenance span by content/span identity, never by array index alone
+        const matchedOriginal =
+          item.sourceSpan === null
+            ? undefined
+            : session.draft.items.find((orig) => {
+                const samePrice = Number(orig.unit_amount.value) === Number(cleanPrice);
+                if (item.sourceSpan && orig.sourceSpan) {
+                  return (
+                    orig.sourceSpan.start === item.sourceSpan.start &&
+                    orig.sourceSpan.end === item.sourceSpan.end &&
+                    orig.name === cleanName &&
+                    samePrice
+                  );
+                }
+                return orig.name === cleanName && samePrice;
+              });
+
+        const preservedSpan = matchedOriginal?.sourceSpan ?? null;
+
+        return {
+          name: cleanName,
+          description: item.description?.trim() || undefined,
+          quantity: cleanQty,
+          unit_amount: {
+            currency_code: currCode,
+            value: cleanPrice,
+          },
+          sourceSpan: preservedSpan,
+          isAmbiguous: false,
+          clarificationQuestion: null,
+        };
+      });
     }
 
     const validated = ExtractedInvoiceDraftSchema.parse(nextDraft);
@@ -515,6 +544,12 @@ export class InvoiceWorkflowService {
         session.draft.items.some((it) => Number(it.unit_amount.value) <= 0)
       ) {
         missingReasons.push("positive line item amount");
+      }
+      if (session.draft.items.some((it) => !(Number(it.quantity) > 0))) {
+        missingReasons.push("positive line item quantity");
+      }
+      if (session.draft.items.some((it) => it.isAmbiguous)) {
+        missingReasons.push("ambiguous line item clarification");
       }
 
       if (missingReasons.length > 0) {
@@ -650,6 +685,15 @@ export class InvoiceWorkflowService {
         required: false,
       });
     }
+    draft.items.forEach((item, idx) => {
+      if (item.isAmbiguous && item.clarificationQuestion) {
+        list.push({
+          field: draft.items.length > 1 ? `items[${idx + 1}]` : "items",
+          question: item.clarificationQuestion,
+          required: true,
+        });
+      }
+    });
     return list;
   }
 

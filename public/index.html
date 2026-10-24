@@ -15,7 +15,7 @@
         <p class="subtitle">Turn client project notes into verified PayPal invoices with source quotes &amp; two-step human approval</p>
       </div>
     </div>
-    <div class="mode-badges" aria-live="polite">
+    <div class="mode-badges">
       <span id="badge-extraction" class="mode-badge">Extraction: Loading...</span>
       <span id="badge-paypal" class="mode-badge">PayPal: Loading...</span>
     </div>
@@ -25,7 +25,7 @@
     <strong>Privacy &amp; Safety Notice:</strong> Use fictional or redacted project notes only. Every PayPal action requires two separate approvals (Gate 1: Create Draft, Gate 2: Send to Client).
   </div>
 
-  <!-- Top-level workspace alert banner visible across all columns -->
+  <!-- Sticky top-level workspace alert banner (Live Region 1 of 2) -->
   <div class="alert-container">
     <div id="error-toast" class="error-toast hidden" role="alert" aria-live="assertive">
       <div class="error-toast-body">
@@ -67,11 +67,11 @@
       <div id="provenance-box" class="provenance-box hidden">
         <div class="provenance-header">
           <span class="section-label">Highlighted Quotes from Client Message</span>
-          <span class="provenance-hint">Select any field in Step 2 or click a highlighted quote below to link source text</span>
+          <span class="provenance-hint">Select any field in Step 2 or activate a highlighted quote below to link source text</span>
         </div>
         <div id="highlighted-source" class="highlighted-source" role="region" aria-label="Client message with highlighted quotes"></div>
-        <div id="active-span-meta" class="active-span-meta" aria-live="polite">
-          Select a field or click a highlighted quote to see which detail it matched.
+        <div id="active-span-meta" class="active-span-meta">
+          Select a field or activate a highlighted quote to see which detail it matched.
         </div>
       </div>
     </section>
@@ -89,11 +89,11 @@
 
       <div id="review-content" class="hidden">
         <!-- Locked Notice Banner (shown after Gate 1 creates the PayPal draft) -->
-        <div id="locked-banner" class="locked-banner hidden" aria-live="polite">
+        <div id="locked-banner" class="locked-banner hidden">
           <strong>Draft Locked:</strong> A PayPal draft invoice has been created for this session. Fields are now read-only.
         </div>
 
-        <!-- Missing / Unclear Fields Banner -->
+        <!-- Missing / Unclear Fields Banner (Live Region 2 of 2) -->
         <div id="questions-banner" class="questions-banner hidden" aria-live="polite">
           <div class="questions-title">
             Missing or Unclear Details — Please Complete Below
@@ -101,7 +101,7 @@
           <ul id="questions-list"></ul>
         </div>
 
-        <div id="resolved-banner" class="resolved-banner hidden" aria-live="polite">
+        <div id="resolved-banner" class="resolved-banner hidden">
           All required invoice details are complete. Ready for Gate 1 approval.
         </div>
 
@@ -178,10 +178,9 @@
               <input
                 type="date"
                 id="input-duedate"
-                placeholder="YYYY-MM-DD"
                 aria-describedby="span-tag-dueDate hint-duedate"
               />
-              <small id="hint-duedate" class="field-hint">Format: YYYY-MM-DD (overrides Payment Term if set)</small>
+              <small id="hint-duedate" class="field-hint">Overrides Payment Term if a calendar date is selected</small>
             </div>
 
             <div class="form-group">
@@ -205,7 +204,7 @@
 
             <div id="line-items-list" class="line-items-list"></div>
 
-            <div class="invoice-total-row" aria-live="polite">
+            <div class="invoice-total-row">
               <span>Invoice Total:</span>
               <strong id="invoice-total-display">USD $0.00</strong>
             </div>
@@ -215,8 +214,8 @@
             <button type="submit" id="btn-save-draft" class="btn btn-secondary">
               Save Changes
             </button>
-            <span id="dirty-indicator" class="dirty-indicator hidden" aria-live="polite">
-              Unsaved edits — will also auto-save when you approve Gate 1
+            <span id="dirty-indicator" class="dirty-indicator hidden">
+              Unsaved edits — will auto-save on Gate 1, or click Save Changes
             </span>
           </div>
         </form>
@@ -243,7 +242,7 @@
       <div class="gate-card" id="gate1-card">
         <div class="gate-card-header">
           <strong>Gate 1: Create PayPal Draft Invoice</strong>
-          <span id="gate1-status" class="gate-badge" aria-live="polite">Awaiting Extraction</span>
+          <span id="gate1-status" class="gate-badge">Awaiting Extraction</span>
         </div>
         <p class="gate-desc">
           Creates an editable draft invoice in PayPal Sandbox (<code>POST /v2/invoicing/invoices</code>). <strong>Does not email or notify the client.</strong>
@@ -252,7 +251,7 @@
         <button type="button" id="btn-approve-draft" class="btn btn-gate1 btn-block" disabled>
           Approve &amp; Create PayPal Draft
         </button>
-        <p id="gate1-reason" class="gate-reason" aria-live="polite">
+        <p id="gate1-reason" class="gate-reason">
           Extract a client message in Step 1 to begin.
         </p>
       </div>
@@ -261,7 +260,7 @@
       <div class="gate-card" id="gate2-card">
         <div class="gate-card-header">
           <strong>Gate 2: Send Invoice to Client</strong>
-          <span id="gate2-status" class="gate-badge" aria-live="polite">Locked</span>
+          <span id="gate2-status" class="gate-badge">Locked</span>
         </div>
         <p class="gate-desc">
           Sends the payable invoice and hosted payment link to the recipient (<code>POST /v2/invoicing/invoices/{id}/send</code>).
@@ -270,11 +269,16 @@
         <button type="button" id="btn-approve-send" class="btn btn-gate2 btn-block" disabled>
           Review &amp; Send Invoice...
         </button>
+        <p id="gate2-reason" class="gate-reason">
+          Complete Gate 1 first to create the PayPal draft before sending.
+        </p>
+      </div>
 
-        <!-- Irreversible Action Confirmation Box -->
-        <div id="gate2-confirm-box" class="gate-confirm-box hidden" role="region" aria-label="Confirm sending invoice">
-          <div class="gate-confirm-title">Confirm Sending Invoice to Client</div>
-          <p class="gate-confirm-note">This action sends a live payment link to the recipient:</p>
+      <!-- Native modal dialog for irreversible Gate 2 send confirmation -->
+      <dialog id="gate2-confirm-dialog" class="gate-confirm-dialog" aria-labelledby="gate2-dialog-title">
+        <div class="gate-confirm-content">
+          <div id="gate2-dialog-title" class="gate-confirm-title">Confirm Sending Invoice to Client</div>
+          <p class="gate-confirm-note">This action emails a payable invoice link to your client:</p>
           <dl class="gate-confirm-summary">
             <div>
               <dt>Recipient:</dt>
@@ -298,14 +302,10 @@
             </button>
           </div>
         </div>
-
-        <p id="gate2-reason" class="gate-reason" aria-live="polite">
-          Complete Gate 1 first to create the PayPal draft before sending.
-        </p>
-      </div>
+      </dialog>
 
       <!-- Live PayPal Status Card -->
-      <div id="paypal-truth-card" class="paypal-truth-card hidden" aria-live="polite">
+      <div id="paypal-truth-card" class="paypal-truth-card hidden">
         <div class="truth-header">
           <div>
             <span class="section-label">Live PayPal Invoice Status</span>
@@ -317,7 +317,7 @@
         </div>
 
         <div id="pp-sim-notice" class="sim-notice hidden">
-          RECORDED SANDBOX SIMULATION MODE — Set <code>PAYPAL_CLIENT_ID</code> &amp; <code>PAYPAL_CLIENT_SECRET</code> to run against live PayPal Sandbox.
+          SANDBOX SIMULATION MODE — Set <code>PAYPAL_CLIENT_ID</code> &amp; <code>PAYPAL_CLIENT_SECRET</code> to run against live PayPal Sandbox.
         </div>
 
         <div id="pp-links" class="pp-links"></div>
@@ -332,14 +332,14 @@
         </div>
       </div>
 
-      <!-- Developer Payload, Offsets & Raw Response Inspector -->
+      <!-- Technical Details Inspector -->
       <details class="payload-inspector">
         <summary>
-          <span class="dev-pill">Developer Only</span>
-          Inspect Raw PayPal v2 Payload, API Response &amp; Character Offsets
+          <span class="dev-pill">Technical Details</span>
+          PayPal API JSON Payload, Response &amp; Text Offsets
         </summary>
         <div class="inspector-block">
-          <small>Extracted Source Span Character Offsets:</small>
+          <small>Extracted Quote Character Offsets:</small>
           <pre id="pre-spans">No draft extracted yet.</pre>
         </div>
         <div class="inspector-block">

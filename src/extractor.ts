@@ -83,24 +83,48 @@ export class DeterministicExtractor implements ExtractionProvider {
 
     // 3. Amount / pricing extraction - support thousands commas (1,200 or 12,450.75) and multi-line items
     const numPattern = "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)";
-    const lineItemRegex = new RegExp(
-      `^\\s*(?:\\d+[.)]|[-*•])\\s*(.+?)\\s*[:\\-–]\\s*(?:\\$|€|USD|EUR)?\\s*${numPattern}(?:\\s*(?:USD|EUR|\\$|€))?\\s*$`,
-      "gim"
+    const genericListLineRegex = /^\s*(?:\d+[.)]|[-*•])\s*(.+?)\s*$/gm;
+    const exactPricedBodyRegex = new RegExp(
+      `^(.+?)\\s*[:\\-–]\\s*(?:\\$|€|USD|EUR)?\\s*${numPattern}(?:\\s*(?:USD|EUR|\\$|€))?\\s*$`,
+      "i"
     );
     const extractedItems: ExtractedInvoiceDraft["items"] = [];
-    for (const match of rawText.matchAll(lineItemRegex)) {
-      const fullLine = match[0].trim();
-      const itemName = match[1].trim();
-      const itemPrice = normalizeAmountString(match[2]);
-      extractedItems.push({
-        name: itemName || "Freelance Service Deliverable",
-        quantity: "1",
-        unit_amount: {
-          currency_code: currencyVal ?? "USD",
-          value: itemPrice,
-        },
-        sourceSpan: findExactSpan(rawText, fullLine),
-      });
+    for (const listMatch of rawText.matchAll(genericListLineRegex)) {
+      const fullLine = listMatch[0].trim();
+      const body = listMatch[1].trim();
+      const pricedMatch = body.match(exactPricedBodyRegex);
+      if (pricedMatch) {
+        const itemName = pricedMatch[1].trim();
+        const itemPrice = normalizeAmountString(pricedMatch[2]);
+        extractedItems.push({
+          name: itemName || "Freelance Service Deliverable",
+          quantity: "1",
+          unit_amount: {
+            currency_code: currencyVal ?? "USD",
+            value: itemPrice,
+          },
+          sourceSpan: findExactSpan(rawText, fullLine),
+          isAmbiguous: false,
+          clarificationQuestion: null,
+        });
+      } else {
+        // Unparsed or recurring list line (e.g. "$20/month" or "included") — never drop silently
+        const parts = body.split(/\s*[:\-–]\s*/);
+        const itemName = (parts[0] || body).trim() || "Deliverable";
+        const candidateNum = body.match(new RegExp(numPattern));
+        const fallbackPrice = candidateNum ? normalizeAmountString(candidateNum[1]) : "0.00";
+        extractedItems.push({
+          name: itemName,
+          quantity: "1",
+          unit_amount: {
+            currency_code: currencyVal ?? "USD",
+            value: fallbackPrice,
+          },
+          sourceSpan: findExactSpan(rawText, fullLine),
+          isAmbiguous: true,
+          clarificationQuestion: `Clarify pricing for "${fullLine}" — enter a one-time unit amount or remove the item.`,
+        });
+      }
     }
 
     let amountVal = "0.00";

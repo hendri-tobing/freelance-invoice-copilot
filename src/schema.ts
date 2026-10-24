@@ -28,6 +28,8 @@ export const InvoiceItemSchema = z.object({
     value: z.string().regex(/^\d+(\.\d{1,2})?$/, "Unit amount must be numeric with up to 2 decimal places"),
   }),
   sourceSpan: SourceSpanSchema.nullable().optional(),
+  isAmbiguous: z.boolean().optional(),
+  clarificationQuestion: z.string().nullable().optional(),
 });
 
 export type InvoiceItem = z.infer<typeof InvoiceItemSchema>;
@@ -58,6 +60,24 @@ export function formatPayPalInvoiceV2Payload(draft: ExtractedInvoiceDraft, invoi
   }
   if (!draft.paymentTerm.value && !draft.dueDate.value) {
     throw new Error("Cannot build PayPal invoice payload without a confirmed payment term or due date.");
+  }
+
+  for (const item of draft.items) {
+    if (item.isAmbiguous) {
+      throw new Error(
+        `Cannot build PayPal invoice payload while line item "${item.name}" needs clarification.`
+      );
+    }
+    if (!(Number(item.quantity) > 0)) {
+      throw new Error(
+        `Cannot build PayPal invoice payload: item "${item.name}" quantity must be greater than 0.`
+      );
+    }
+    if (!(Number(item.unit_amount.value) > 0)) {
+      throw new Error(
+        `Cannot build PayPal invoice payload: item "${item.name}" unit amount must be greater than 0.`
+      );
+    }
   }
 
   const payload: Record<string, unknown> = {

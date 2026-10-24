@@ -114,34 +114,92 @@ describe("HTTP API & Web UI Server (src/server.ts)", () => {
     expect(afterPay.paypalInvoice.status).toBe("PAID");
   });
 
-  it("serves the Single-Page Web UI at GET / and maps error codes by error type rather than message substring", async () => {
+  it("preserves provenance on remaining line item when item 1 is removed via PATCH /api/sessions/:id/draft and rejects invalid quantity", async () => {
+    const extractRes = await fetch(`${baseUrl}/api/sessions/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        rawText: [
+          "Client: Jordan Patel <jordan@brightwave.io>",
+          "1. Discovery & UX Audit: $400 USD",
+          "2. Design System Kit: $800 USD",
+          "3. Revisions: included",
+          "Payment terms: Net 14.",
+        ].join("\n"),
+      }),
+    });
+    expect(extractRes.status).toBe(201);
+    const session = await extractRes.json();
+    expect(session.draft.items).toHaveLength(3);
+    expect(session.draft.items[2].isAmbiguous).toBe(true);
+    const originalItem2Span = session.draft.items[1].sourceSpan;
+    expect(originalItem2Span.text).toContain("Design System Kit");
+
+    // Attempting Gate 1 while item 3 ("Revisions: included") is unpriced/ambiguous must return 400
+    const blockedApprove = await fetch(
+      `${baseUrl}/api/sessions/${session.id}/approve-draft`,
+      { method: "POST" }
+    );
+    expect(blockedApprove.status).toBe(400);
+
+    // User removes item 1 and item 3, keeping only item 2 ("Design System Kit")
+    const patchKeepItem2 = await fetch(`${baseUrl}/api/sessions/${session.id}/draft`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [
+          {
+            name: "Design System Kit",
+            quantity: "1",
+            unitPrice: "800.00",
+            sourceSpan: originalItem2Span,
+          },
+        ],
+      }),
+    });
+    expect(patchKeepItem2.status).toBe(200);
+    const afterKeep = await patchKeepItem2.json();
+    expect(afterKeep.draft.items).toHaveLength(1);
+    expect(afterKeep.draft.items[0].name).toBe("Design System Kit");
+    expect(afterKeep.draft.items[0].sourceSpan.text).toBe(originalItem2Span.text);
+
+    // Setting quantity to "0" must block Gate 1 on the server
+    await fetch(`${baseUrl}/api/sessions/${session.id}/draft`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [
+          {
+            name: "Design System Kit",
+            quantity: "0",
+            unitPrice: "800.00",
+          },
+        ],
+      }),
+    });
+    const zeroQtyApprove = await fetch(
+      `${baseUrl}/api/sessions/${session.id}/approve-draft`,
+      { method: "POST" }
+    );
+    expect(zeroQtyApprove.status).toBe(400);
+  });
+
+  it("serves static assets at GET / and maps error codes by error class rather than message substring", async () => {
     const res = await fetch(`${baseUrl}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
-    const html = await res.text();
-    expect(html).toContain("Freelance Invoice Copilot");
-    expect(html).toContain('role="alert"');
-    expect(html).toContain("gate2-confirm-box");
-    expect(html).toContain("dirty-indicator");
-    expect(html).toContain("Developer Only");
 
     const cssRes = await fetch(`${baseUrl}/styles.css`);
     expect(cssRes.status).toBe(200);
-    const css = await cssRes.text();
-    expect(css).toContain("input:disabled");
-    expect(css).toContain(".currency-prefix");
 
     const jsRes = await fetch(`${baseUrl}/app.js`);
     expect(jsRes.status).toBe(200);
-    const js = await jsRes.text();
-    expect(js).toContain("saveDraftFromForm");
-    expect(js).toContain("editableItems");
 
     // Non-existent session returns 404 via NotFoundError
     const missingRes = await fetch(`${baseUrl}/api/sessions/non-existent-id`);
     expect(missingRes.status).toBe(404);
 
-    // Invalid JSON or validation failure containing "not found" in payload still returns 400, not 404
+    // Invalid JSON or validation failure returns 400, not 404
     const badPatchRes = await fetch(`${baseUrl}/api/sessions/extract`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

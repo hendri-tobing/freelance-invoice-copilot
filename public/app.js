@@ -3,7 +3,7 @@ let activeHighlightField = null;
 let isFormDirty = false;
 let editableItems = [];
 
-const el = (id) => document.getElementById(id);
+const el = (id) => (typeof document !== "undefined" ? document.getElementById(id) : null);
 
 const CURRENCY_SYMBOLS = {
   USD: "$",
@@ -32,8 +32,39 @@ const TERM_LABELS = {
   NET_60: "Net 60 (60 days)",
 };
 
-function getCurrencySymbol(code) {
+export function getCurrencySymbol(code) {
   return CURRENCY_SYMBOLS[code] || "¤";
+}
+
+export function getUiState() {
+  return {
+    currentSession,
+    activeHighlightField,
+    isFormDirty,
+    editableItems,
+  };
+}
+
+export function setUiStateForTest(partial) {
+  if ("currentSession" in partial) currentSession = partial.currentSession;
+  if ("activeHighlightField" in partial) activeHighlightField = partial.activeHighlightField;
+  if ("isFormDirty" in partial) isFormDirty = partial.isFormDirty;
+  if ("editableItems" in partial) editableItems = partial.editableItems;
+}
+
+export function confirmDiscardIfDirty(
+  confirmFn = typeof window !== "undefined" && typeof window.confirm === "function"
+    ? (msg) => window.confirm(msg)
+    : () => true
+) {
+  if (!isFormDirty) return true;
+  const proceed = confirmFn(
+    "You have unsaved edits in Step 2. Discard your changes and load new text?"
+  );
+  if (proceed) {
+    isFormDirty = false;
+  }
+  return Boolean(proceed);
 }
 
 async function apiCall(path, options = {}) {
@@ -48,10 +79,11 @@ async function apiCall(path, options = {}) {
   return data;
 }
 
-function showError(msg, context = "Error") {
+export function showError(msg, context = "Error") {
   const box = el("error-toast");
   const ctxBadge = el("error-toast-context");
   const msgSpan = el("error-toast-msg");
+  if (!box || !ctxBadge || !msgSpan) return;
   if (!msg) {
     box.classList.add("hidden");
     msgSpan.textContent = "";
@@ -60,7 +92,6 @@ function showError(msg, context = "Error") {
   ctxBadge.textContent = context;
   msgSpan.textContent = msg;
   box.classList.remove("hidden");
-  box.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
 function escapeHtml(str) {
@@ -77,7 +108,7 @@ function truncateQuote(text, maxLen = 28) {
   return `${clean.slice(0, maxLen - 1)}…`;
 }
 
-function collectSpans(draft) {
+export function collectSpans(draft) {
   const spans = [];
   const add = (field, label, spanObj) => {
     if (spanObj && typeof spanObj.start === "number" && typeof spanObj.end === "number") {
@@ -119,7 +150,43 @@ function focusFieldForSpan(fieldKey) {
   }
 }
 
-function renderProvenanceHighlight() {
+/**
+ * Updates active quote highlight in-place without rebuilding #highlighted-source innerHTML,
+ * preserving existing <mark> DOM nodes and keyboard focus.
+ */
+export function setActiveHighlightField(fieldKey) {
+  activeHighlightField = fieldKey;
+  if (!currentSession) return;
+
+  const container = el("highlighted-source");
+  if (container) {
+    container.querySelectorAll(".source-mark").forEach((markEl) => {
+      const isMatch = markEl.getAttribute("data-field") === fieldKey;
+      markEl.classList.toggle("active", isMatch);
+    });
+  }
+
+  const spans = collectSpans(currentSession.draft);
+  const matchingSpans = spans.filter((s) => s.field === activeHighlightField);
+  const meta = el("active-span-meta");
+  if (meta) {
+    if (matchingSpans.length > 0) {
+      const label = FIELD_LABELS[activeHighlightField] || activeHighlightField;
+      const quotes = matchingSpans.map((s) => `"${s.text}"`).join(", ");
+      meta.textContent = `Matched quote for ${label}: ${quotes}`;
+    } else {
+      meta.textContent =
+        spans.length > 0
+          ? `${spans.length} quote(s) linked from the client message. Activate any quote above or select a field in Step 2.`
+          : "No direct text quotes matched.";
+    }
+  }
+}
+
+/**
+ * Builds the <mark> DOM nodes inside #highlighted-source once per session render.
+ */
+export function renderProvenanceDomOnce() {
   if (!currentSession) return;
   const raw = currentSession.rawText;
   const spans = collectSpans(currentSession.draft);
@@ -154,39 +221,29 @@ function renderProvenanceHighlight() {
   }
 
   const container = el("highlighted-source");
-  container.innerHTML = html;
+  if (container) {
+    container.innerHTML = html;
 
-  // Make highlighted <mark> elements interactive by click and keyboard
-  container.querySelectorAll(".source-mark").forEach((markEl) => {
-    const activate = () => {
-      const f = markEl.getAttribute("data-field");
-      activeHighlightField = f;
-      renderProvenanceHighlight();
-      focusFieldForSpan(f);
-    };
-    markEl.addEventListener("click", activate);
-    markEl.addEventListener("keydown", (ev) => {
-      if (ev.key === "Enter" || ev.key === " ") {
-        ev.preventDefault();
-        activate();
-      }
+    // Wire click & keyboard activation without destroying the DOM node
+    container.querySelectorAll(".source-mark").forEach((markEl) => {
+      markEl.addEventListener("click", () => {
+        const f = markEl.getAttribute("data-field");
+        setActiveHighlightField(f);
+        focusFieldForSpan(f);
+      });
+      markEl.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          const f = markEl.getAttribute("data-field");
+          setActiveHighlightField(f);
+        }
+      });
     });
-  });
-
-  const matchingSpans = spans.filter((s) => s.field === activeHighlightField);
-  const meta = el("active-span-meta");
-  if (matchingSpans.length > 0) {
-    const label = FIELD_LABELS[activeHighlightField] || activeHighlightField;
-    const quotes = matchingSpans.map((s) => `"${s.text}"`).join(", ");
-    meta.textContent = `Matched quote for ${label}: ${quotes}`;
-  } else {
-    meta.textContent =
-      spans.length > 0
-        ? `${spans.length} quote(s) linked from the client message. Click any quote above or select a field in Step 2.`
-        : "No direct text quotes matched.";
   }
 
-  // Populate raw character offsets inside Developer Inspector only
+  setActiveHighlightField(activeHighlightField);
+
+  // Populate raw character offsets inside Technical Details Inspector only
   const preSpans = el("pre-spans");
   if (preSpans) {
     preSpans.textContent =
@@ -208,7 +265,10 @@ function renderProvenanceHighlight() {
 function updateSpanBadge(fieldKey, fieldObj, isRequired = false) {
   const badge = el(`span-tag-${fieldKey}`);
   if (!badge) return;
-  const group = document.querySelector(`.form-group[data-field="${fieldKey}"]`);
+  const group =
+    typeof document !== "undefined"
+      ? document.querySelector(`.form-group[data-field="${fieldKey}"]`)
+      : null;
 
   if (fieldObj?.isAmbiguous) {
     badge.textContent = isRequired ? "Missing — Required" : "Needs Review";
@@ -229,23 +289,23 @@ function updateSpanBadge(fieldKey, fieldObj, isRequired = false) {
   }
 }
 
-function setFormDirty(dirty) {
+export function setFormDirty(dirty) {
   isFormDirty = dirty;
   const indicator = el("dirty-indicator");
   const saveBtn = el("btn-save-draft");
-  if (!indicator || !saveBtn) return;
-
-  if (dirty && currentSession?.flow?.stage === "proposed") {
-    indicator.classList.remove("hidden");
-    saveBtn.classList.add("dirty-highlight");
-  } else {
-    indicator.classList.add("hidden");
-    saveBtn.classList.remove("dirty-highlight");
+  if (indicator && saveBtn) {
+    if (dirty && currentSession?.flow?.stage === "proposed") {
+      indicator.classList.remove("hidden");
+      saveBtn.classList.add("dirty-highlight");
+    } else {
+      indicator.classList.add("hidden");
+      saveBtn.classList.remove("dirty-highlight");
+    }
   }
   updateGateControls();
 }
 
-function computeInvoiceTotal() {
+export function computeInvoiceTotal() {
   let sum = 0;
   for (const item of editableItems) {
     const qty = Number(item.quantity) || 0;
@@ -256,30 +316,65 @@ function computeInvoiceTotal() {
 }
 
 function updateInvoiceTotalDisplay() {
-  const currCode = el("input-currency").value || currentSession?.draft?.currency?.value || "USD";
+  const currEl = el("input-currency");
+  const currCode = currEl?.value || currentSession?.draft?.currency?.value || "USD";
   const sym = getCurrencySymbol(currCode);
   const total = computeInvoiceTotal();
-  el("invoice-total-display").textContent = `${currCode} ${sym}${total.toFixed(2)}`;
+  const totalEl = el("invoice-total-display");
+  if (totalEl) {
+    totalEl.textContent = `${currCode} ${sym}${total.toFixed(2)}`;
+  }
 
-  // Also update all currency prefix badges inside line items
-  document.querySelectorAll(".currency-prefix").forEach((node) => {
-    node.textContent = sym;
-  });
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".currency-prefix").forEach((node) => {
+      node.textContent = sym;
+    });
+  }
+}
+
+export function removeLineItemAt(idx, isLocked = false) {
+  if (editableItems.length <= 1 || isLocked) return false;
+  editableItems.splice(idx, 1);
+  renderLineItems(isLocked);
+  updateInvoiceTotalDisplay();
+  setFormDirty(true);
+  return true;
+}
+
+export function updateLineItemField(idx, prop, newValue) {
+  if (!editableItems[idx]) return;
+  editableItems[idx][prop] = newValue;
+  if (prop === "name" || prop === "unitPrice") {
+    // User edited the deliverable description or price: clear stale quote span & resolve item ambiguity
+    editableItems[idx].sourceSpan = null;
+    editableItems[idx].isAmbiguous = false;
+    editableItems[idx].clarificationQuestion = null;
+  }
+  updateInvoiceTotalDisplay();
+  setFormDirty(true);
 }
 
 function renderLineItems(isLocked) {
   const container = el("line-items-list");
+  if (!container) return;
   container.innerHTML = "";
-  const currCode = el("input-currency").value || currentSession?.draft?.currency?.value || "USD";
+  const currCode = el("input-currency")?.value || currentSession?.draft?.currency?.value || "USD";
   const sym = getCurrencySymbol(currCode);
 
   editableItems.forEach((item, idx) => {
     const card = document.createElement("div");
-    card.className = "line-item-card";
+    card.className = item.isAmbiguous ? "line-item-card ambiguous-field" : "line-item-card";
 
-    const quoteBadgeHtml = item.sourceSpan
-      ? `<span class="span-tag">Quote: "${escapeHtml(truncateQuote(item.sourceSpan.text))}"</span>`
-      : `<span class="span-tag">Edited by you</span>`;
+    let quoteBadgeHtml;
+    if (item.isAmbiguous) {
+      quoteBadgeHtml = `<span class="span-tag missing" data-item-badge="${idx}">Needs Review — Edit Price or Remove</span>`;
+    } else if (item.sourceSpan) {
+      quoteBadgeHtml = `<span class="span-tag" data-item-badge="${idx}">Quote: "${escapeHtml(
+        truncateQuote(item.sourceSpan.text)
+      )}"</span>`;
+    } else {
+      quoteBadgeHtml = `<span class="span-tag" data-item-badge="${idx}">Edited by you</span>`;
+    }
 
     const removeBtnHtml =
       editableItems.length > 1 && !isLocked
@@ -291,13 +386,13 @@ function renderLineItems(isLocked) {
     card.innerHTML = `
       <div class="line-item-card-top">
         <span class="line-item-index">Item #${idx + 1}</span>
-        <div style="display:flex; align-items:center; gap:6px;">
+        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
           ${quoteBadgeHtml}
           ${removeBtnHtml}
         </div>
       </div>
       <div class="item-grid">
-        <div class="item-field">
+        <div class="item-field item-field-name">
           <label for="input-item-name-${idx}">Deliverable Description <span class="req" aria-hidden="true">*</span></label>
           <input
             type="text"
@@ -350,11 +445,16 @@ function renderLineItems(isLocked) {
     inp.addEventListener("input", () => {
       const idx = Number(inp.getAttribute("data-item-index"));
       const prop = inp.getAttribute("data-item-prop");
-      if (editableItems[idx] && prop) {
-        editableItems[idx][prop] = inp.value;
+      updateLineItemField(idx, prop, inp.value);
+
+      // Update badge & card style in-place without losing focus on the input
+      const badgeEl = container.querySelector(`[data-item-badge="${idx}"]`);
+      const cardEl = inp.closest(".line-item-card");
+      if (badgeEl && !editableItems[idx]?.sourceSpan) {
+        badgeEl.textContent = "Edited by you";
+        badgeEl.className = "span-tag";
       }
-      updateInvoiceTotalDisplay();
-      setFormDirty(true);
+      cardEl?.classList.remove("ambiguous-field");
     });
   });
 
@@ -362,12 +462,7 @@ function renderLineItems(isLocked) {
   container.querySelectorAll(".btn-remove-item").forEach((btn) => {
     btn.addEventListener("click", () => {
       const idx = Number(btn.getAttribute("data-index"));
-      if (editableItems.length > 1) {
-        editableItems.splice(idx, 1);
-        renderLineItems(isLocked);
-        updateInvoiceTotalDisplay();
-        setFormDirty(true);
-      }
+      removeLineItemAt(idx, isLocked);
     });
   });
 
@@ -379,24 +474,27 @@ function renderLineItems(isLocked) {
   updateInvoiceTotalDisplay();
 }
 
-function getFormMissingReasons() {
+export function getFormMissingReasons() {
   const reasons = [];
-  const email = el("input-email").value.trim();
-  const currency = el("input-currency").value.trim();
-  const term = el("input-term").value.trim();
-  const dueDate = el("input-duedate").value.trim();
+  const email = (el("input-email")?.value ?? currentSession?.draft?.recipientEmail?.value ?? "").trim();
+  const currency = (el("input-currency")?.value ?? currentSession?.draft?.currency?.value ?? "").trim();
+  const term = (el("input-term")?.value ?? currentSession?.draft?.paymentTerm?.value ?? "").trim();
+  const dueDate = (el("input-duedate")?.value ?? currentSession?.draft?.dueDate?.value ?? "").trim();
 
   if (!email) reasons.push("Client Billing Email");
   if (!currency) reasons.push("Currency");
   if (!term && !dueDate) reasons.push("Payment Term or Specific Due Date");
 
+  if (editableItems.some((it) => it.isAmbiguous)) {
+    reasons.push("Unclear Line Item (edit price or remove)");
+  }
   const hasValidItems =
     editableItems.length > 0 &&
     editableItems.every(
       (it) => String(it.name || "").trim().length > 0 && Number(it.unitPrice) > 0 && Number(it.quantity) > 0
     );
   if (!hasValidItems) {
-    reasons.push("Line Item amount (> 0)");
+    reasons.push("Line Item quantity and amount (> 0)");
   }
   return reasons;
 }
@@ -413,7 +511,8 @@ function updateGateControls() {
   const gate2Time = el("gate2-timestamp");
   const gate2Reason = el("gate2-reason");
   const btnSend = el("btn-approve-send");
-  const confirmBox = el("gate2-confirm-box");
+
+  if (!gate1Status || !btnDraft || !gate2Status || !btnSend) return;
 
   const missingReasons = getFormMissingReasons();
   const canApproveGate1 = missingReasons.length === 0;
@@ -437,8 +536,6 @@ function updateGateControls() {
     gate2Status.className = "gate-badge";
     gate2Time.classList.add("hidden");
     btnSend.disabled = true;
-    btnSend.classList.remove("hidden");
-    confirmBox.classList.add("hidden");
     gate2Reason.textContent = "Complete Gate 1 first to create the PayPal draft before sending.";
   } else if (currentSession.flow.stage === "draft_created") {
     gate1Status.textContent = "Approved & Draft Created";
@@ -452,7 +549,7 @@ function updateGateControls() {
     gate2Status.className = "gate-badge";
     gate2Time.classList.add("hidden");
     btnSend.disabled = false;
-    gate2Reason.textContent = "You will review a final summary before the invoice is emailed to the client.";
+    gate2Reason.textContent = "Opens a confirmation dialog before emailing the invoice to the client.";
   } else if (currentSession.flow.stage === "sent") {
     gate1Status.textContent = "Approved & Draft Created";
     gate1Status.className = "gate-badge approved";
@@ -466,38 +563,79 @@ function updateGateControls() {
     gate2Time.textContent = `Approved at: ${currentSession.flow.sentApprovedAt}`;
     gate2Time.classList.remove("hidden");
     btnSend.disabled = true;
-    btnSend.classList.remove("hidden");
-    confirmBox.classList.add("hidden");
     gate2Reason.textContent = "Invoice has been sent to the recipient.";
   }
 }
 
-function renderSession(session) {
+export function openGate2ConfirmDialog() {
+  if (!currentSession || currentSession.flow.stage !== "draft_created") return false;
+  const dialog = el("gate2-confirm-dialog");
+  if (!dialog) return false;
+
+  const d = currentSession.draft;
+  const currCode = d.currency.value || "USD";
+  const sym = getCurrencySymbol(currCode);
+  const total = computeInvoiceTotal();
+
+  const recipientText = d.recipientName.value
+    ? `${d.recipientName.value} (${d.recipientEmail.value})`
+    : d.recipientEmail.value || "—";
+  const termsText = d.dueDate.value
+    ? `Due on ${d.dueDate.value}`
+    : TERM_LABELS[d.paymentTerm.value] || d.paymentTerm.value || "—";
+
+  el("confirm-recipient").textContent = recipientText;
+  el("confirm-amount").textContent = `${currCode} ${sym}${total.toFixed(2)} (${editableItems.length} item${
+    editableItems.length === 1 ? "" : "s"
+  })`;
+  el("confirm-terms").textContent = termsText;
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  return true;
+}
+
+export function closeGate2ConfirmDialog() {
+  const dialog = el("gate2-confirm-dialog");
+  if (!dialog) return;
+  if (typeof dialog.close === "function" && dialog.open) {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+  el("btn-approve-send")?.focus();
+}
+
+export function renderSession(session) {
   currentSession = session;
   isFormDirty = false;
   showError(null);
 
-  el("provenance-box").classList.remove("hidden");
-  el("review-empty").classList.add("hidden");
-  el("review-content").classList.remove("hidden");
-  el("gate2-confirm-box").classList.add("hidden");
-  el("btn-approve-send").classList.remove("hidden");
+  el("provenance-box")?.classList.remove("hidden");
+  el("review-empty")?.classList.add("hidden");
+  el("review-content")?.classList.remove("hidden");
+  closeGate2ConfirmDialog();
 
-  renderProvenanceHighlight();
+  renderProvenanceDomOnce();
 
   const d = session.draft;
-  el("input-email").value = d.recipientEmail.value || "";
-  el("input-name").value = d.recipientName.value || "";
-  el("input-currency").value = d.currency.value || "";
-  el("input-term").value = d.paymentTerm.value || "";
-  el("input-duedate").value = d.dueDate.value || "";
-  el("input-note").value = d.note?.value || "";
+  if (el("input-email")) el("input-email").value = d.recipientEmail.value || "";
+  if (el("input-name")) el("input-name").value = d.recipientName.value || "";
+  if (el("input-currency")) el("input-currency").value = d.currency.value || "";
+  if (el("input-term")) el("input-term").value = d.paymentTerm.value || "";
+  if (el("input-duedate")) el("input-duedate").value = d.dueDate.value || "";
+  if (el("input-note")) el("input-note").value = d.note?.value || "";
 
   editableItems = (d.items || []).map((item) => ({
     name: item.name || "Deliverable",
     quantity: String(item.quantity || "1"),
     unitPrice: String(item.unit_amount?.value || "0.00"),
     sourceSpan: item.sourceSpan || null,
+    isAmbiguous: Boolean(item.isAmbiguous),
+    clarificationQuestion: item.clarificationQuestion || null,
   }));
   if (editableItems.length === 0) {
     editableItems.push({
@@ -505,6 +643,8 @@ function renderSession(session) {
       quantity: "1",
       unitPrice: "0.00",
       sourceSpan: null,
+      isAmbiguous: false,
+      clarificationQuestion: null,
     });
   }
 
@@ -518,49 +658,57 @@ function renderSession(session) {
   updateSpanBadge("dueDate", d.dueDate, false);
 
   const itemBadge = el("span-tag-items");
-  const matchedItemSpans = (d.items || []).filter((it) => it.sourceSpan);
-  if (matchedItemSpans.length > 0) {
-    itemBadge.textContent =
-      d.items.length > 1
-        ? `${matchedItemSpans.length} of ${d.items.length} items quoted from text`
-        : `Quote: "${truncateQuote(matchedItemSpans[0].sourceSpan.text)}"`;
-    itemBadge.className = "span-tag";
-  } else {
-    itemBadge.textContent = "Edited by you";
-    itemBadge.className = "span-tag";
+  if (itemBadge) {
+    const matchedItemSpans = (d.items || []).filter((it) => it.sourceSpan);
+    if (matchedItemSpans.length > 0) {
+      itemBadge.textContent =
+        d.items.length > 1
+          ? `${matchedItemSpans.length} of ${d.items.length} items quoted from text`
+          : `Quote: "${truncateQuote(matchedItemSpans[0].sourceSpan.text)}"`;
+      itemBadge.className = "span-tag";
+    } else {
+      itemBadge.textContent = "Edited by you";
+      itemBadge.className = "span-tag";
+    }
   }
 
   // Locked Banner
   const lockedBanner = el("locked-banner");
-  if (isLocked) {
-    lockedBanner.classList.remove("hidden");
-  } else {
-    lockedBanner.classList.add("hidden");
+  if (lockedBanner) {
+    if (isLocked) {
+      lockedBanner.classList.remove("hidden");
+    } else {
+      lockedBanner.classList.add("hidden");
+    }
   }
 
   // Missing / Unclear Questions Banner
   const qBanner = el("questions-banner");
   const rBanner = el("resolved-banner");
   const qList = el("questions-list");
-  qList.innerHTML = "";
-
-  if (session.unresolvedQuestions.length > 0) {
-    qBanner.classList.remove("hidden");
-    rBanner.classList.add("hidden");
-    for (const q of session.unresolvedQuestions) {
-      const li = document.createElement("li");
-      const friendlyField = FIELD_LABELS[q.field] || q.field;
-      li.innerHTML = `<strong>${escapeHtml(friendlyField)}:</strong> ${escapeHtml(q.question)}`;
-      qList.appendChild(li);
+  if (qList && qBanner && rBanner) {
+    qList.innerHTML = "";
+    if (session.unresolvedQuestions.length > 0) {
+      qBanner.classList.remove("hidden");
+      rBanner.classList.add("hidden");
+      for (const q of session.unresolvedQuestions) {
+        const li = document.createElement("li");
+        const friendlyField = FIELD_LABELS[q.field] || q.field;
+        li.innerHTML = `<strong>${escapeHtml(friendlyField)}:</strong> ${escapeHtml(q.question)}`;
+        qList.appendChild(li);
+      }
+    } else {
+      qBanner.classList.add("hidden");
+      rBanner.classList.remove("hidden");
     }
-  } else {
-    qBanner.classList.add("hidden");
-    rBanner.classList.remove("hidden");
   }
 
   // Lock form inputs once draft is created
-  for (const input of el("draft-form").querySelectorAll("input, select, button")) {
-    input.disabled = isLocked;
+  const formEl = el("draft-form");
+  if (formEl) {
+    for (const input of formEl.querySelectorAll("input, select, button")) {
+      input.disabled = isLocked;
+    }
   }
 
   // Stage Stepper with check marks on completed stages
@@ -572,6 +720,7 @@ function renderSession(session) {
   const curIdx = stages.findIndex((s) => s.key === session.flow.stage);
   stages.forEach((st, idx) => {
     const node = el(`step-${st.key}`);
+    if (!node) return;
     node.className = "stage-node";
     node.removeAttribute("aria-current");
     if (idx < curIdx) {
@@ -591,77 +740,84 @@ function renderSession(session) {
 
   // PayPal Status Card
   const truthCard = el("paypal-truth-card");
-  if (session.paypalInvoice) {
-    truthCard.classList.remove("hidden");
-    el("pp-invoice-id").textContent = session.paypalInvoice.id;
-    const statusBadge = el("pp-status-badge");
-    statusBadge.textContent = session.paypalInvoice.status;
-    statusBadge.className = `pp-status-badge ${session.paypalInvoice.status}`;
+  if (truthCard) {
+    if (session.paypalInvoice) {
+      truthCard.classList.remove("hidden");
+      el("pp-invoice-id").textContent = session.paypalInvoice.id;
+      const statusBadge = el("pp-status-badge");
+      statusBadge.textContent = session.paypalInvoice.status;
+      statusBadge.className = `pp-status-badge ${session.paypalInvoice.status}`;
 
-    const simNotice = el("pp-sim-notice");
-    if (session.paypalInvoice.simulationMode) {
-      simNotice.classList.remove("hidden");
+      const simNotice = el("pp-sim-notice");
+      if (session.paypalInvoice.simulationMode) {
+        simNotice.classList.remove("hidden");
+      } else {
+        simNotice.classList.add("hidden");
+      }
+
+      const linksDiv = el("pp-links");
+      linksDiv.innerHTML = "";
+      if (session.paypalInvoice.recipientViewUrl) {
+        linksDiv.innerHTML += `<div>Hosted Payer Link: <a href="${escapeHtml(
+          session.paypalInvoice.recipientViewUrl
+        )}" target="_blank" rel="noreferrer">${escapeHtml(
+          session.paypalInvoice.recipientViewUrl
+        )}</a></div>`;
+      }
+      if (session.paypalInvoice.invoicerViewUrl) {
+        linksDiv.innerHTML += `<div>Invoicer Dashboard Link: <a href="${escapeHtml(
+          session.paypalInvoice.invoicerViewUrl
+        )}" target="_blank" rel="noreferrer">${escapeHtml(
+          session.paypalInvoice.invoicerViewUrl
+        )}</a></div>`;
+      }
+
+      const btnSimPay = el("btn-simulate-pay");
+      if (
+        session.paypalInvoice.simulationMode &&
+        session.flow.stage === "sent" &&
+        session.paypalInvoice.status !== "PAID"
+      ) {
+        btnSimPay.classList.remove("hidden");
+      } else {
+        btnSimPay.classList.add("hidden");
+      }
     } else {
-      simNotice.classList.add("hidden");
+      truthCard.classList.add("hidden");
     }
-
-    const linksDiv = el("pp-links");
-    linksDiv.innerHTML = "";
-    if (session.paypalInvoice.recipientViewUrl) {
-      linksDiv.innerHTML += `<div>Hosted Payer Link: <a href="${escapeHtml(
-        session.paypalInvoice.recipientViewUrl
-      )}" target="_blank" rel="noreferrer">${escapeHtml(
-        session.paypalInvoice.recipientViewUrl
-      )}</a></div>`;
-    }
-    if (session.paypalInvoice.invoicerViewUrl) {
-      linksDiv.innerHTML += `<div>Invoicer Dashboard Link: <a href="${escapeHtml(
-        session.paypalInvoice.invoicerViewUrl
-      )}" target="_blank" rel="noreferrer">${escapeHtml(
-        session.paypalInvoice.invoicerViewUrl
-      )}</a></div>`;
-    }
-
-    const btnSimPay = el("btn-simulate-pay");
-    if (
-      session.paypalInvoice.simulationMode &&
-      session.flow.stage === "sent" &&
-      session.paypalInvoice.status !== "PAID"
-    ) {
-      btnSimPay.classList.remove("hidden");
-    } else {
-      btnSimPay.classList.add("hidden");
-    }
-  } else {
-    truthCard.classList.add("hidden");
   }
 
-  // Developer Inspector
-  el("pre-payload").textContent = session.formattedPayPalPayload
-    ? JSON.stringify(session.formattedPayPalPayload, null, 2)
-    : "Incomplete required fields (email, currency, or payment term missing).";
-  el("pre-response").textContent = session.paypalInvoice
-    ? JSON.stringify(session.paypalInvoice.rawResponse, null, 2)
-    : "No PayPal API call executed yet.";
+  // Technical Details Inspector
+  if (el("pre-payload")) {
+    el("pre-payload").textContent = session.formattedPayPalPayload
+      ? JSON.stringify(session.formattedPayPalPayload, null, 2)
+      : "Incomplete required fields (email, currency, or payment term missing).";
+  }
+  if (el("pre-response")) {
+    el("pre-response").textContent = session.paypalInvoice
+      ? JSON.stringify(session.paypalInvoice.rawResponse, null, 2)
+      : "No PayPal API call executed yet.";
+  }
 }
 
-function buildPatchFromForm() {
+export function buildPatchFromForm() {
   return {
-    recipientEmail: el("input-email").value.trim(),
-    recipientName: el("input-name").value.trim(),
-    currency: el("input-currency").value.trim(),
-    paymentTerm: el("input-term").value.trim(),
-    dueDate: el("input-duedate").value.trim() || null,
-    note: el("input-note").value,
+    recipientEmail: (el("input-email")?.value ?? currentSession?.draft?.recipientEmail?.value ?? "").trim(),
+    recipientName: (el("input-name")?.value ?? currentSession?.draft?.recipientName?.value ?? "").trim(),
+    currency: (el("input-currency")?.value ?? currentSession?.draft?.currency?.value ?? "").trim(),
+    paymentTerm: (el("input-term")?.value ?? currentSession?.draft?.paymentTerm?.value ?? "").trim(),
+    dueDate: (el("input-duedate")?.value ?? currentSession?.draft?.dueDate?.value ?? "").trim() || null,
+    note: el("input-note")?.value ?? currentSession?.draft?.note?.value ?? "",
     items: editableItems.map((it, idx) => ({
       name: String(it.name || "").trim() || `Deliverable ${idx + 1}`,
       quantity: String(it.quantity || "1").trim() || "1",
       unitPrice: String(it.unitPrice || "0.00").trim() || "0.00",
+      sourceSpan: it.sourceSpan || null,
     })),
   };
 }
 
-async function saveDraftFromForm() {
+export async function saveDraftFromForm() {
   if (!currentSession) return null;
   const patch = buildPatchFromForm();
   const updated = await apiCall(`/api/sessions/${currentSession.id}/draft`, {
@@ -672,52 +828,60 @@ async function saveDraftFromForm() {
   return updated;
 }
 
-async function init() {
-  el("error-toast-close").addEventListener("click", () => showError(null));
+export async function init() {
+  el("error-toast-close")?.addEventListener("click", () => showError(null));
 
   try {
     const config = await apiCall("/api/config");
 
     const extBadge = el("badge-extraction");
-    if (config.modes.extractionMode === "live_ai") {
-      extBadge.textContent = "Extraction: LIVE AI (OpenAI)";
-      extBadge.classList.add("live");
-    } else {
-      extBadge.textContent = "Extraction: DETERMINISTIC FALLBACK";
-      extBadge.classList.add("sim");
+    if (extBadge) {
+      if (config.modes.extractionMode === "live_ai") {
+        extBadge.textContent = "Extraction: AI Model (OpenAI)";
+        extBadge.classList.add("live");
+      } else {
+        extBadge.textContent = "Extraction: Built-in Rule Engine";
+        extBadge.classList.add("sim");
+      }
     }
 
     const ppBadge = el("badge-paypal");
-    if (config.modes.paypalMode === "live_sandbox") {
-      ppBadge.textContent = "PayPal: LIVE SANDBOX API";
-      ppBadge.classList.add("live");
-    } else {
-      ppBadge.textContent = "PayPal: RECORDED SANDBOX SIMULATION";
-      ppBadge.classList.add("sim");
+    if (ppBadge) {
+      if (config.modes.paypalMode === "live_sandbox") {
+        ppBadge.textContent = "PayPal: Connected to Sandbox";
+        ppBadge.classList.add("live");
+      } else {
+        ppBadge.textContent = "PayPal: Sandbox Simulation";
+        ppBadge.classList.add("sim");
+      }
     }
 
     const scenList = el("scenario-buttons");
-    config.scenarios.forEach((sc, index) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "scenario-btn";
-      btn.innerHTML = `<span><strong>${escapeHtml(sc.title)}</strong></span><span class="scenario-badge">${escapeHtml(
-        sc.badge
-      )}</span>`;
-      btn.addEventListener("click", () => {
-        el("raw-text-input").value = sc.rawText;
+    if (scenList) {
+      config.scenarios.forEach((sc, index) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "scenario-btn";
+        btn.innerHTML = `<span><strong>${escapeHtml(sc.title)}</strong></span><span class="scenario-badge">${escapeHtml(
+          sc.badge
+        )}</span>`;
+        btn.addEventListener("click", () => {
+          if (!confirmDiscardIfDirty()) return;
+          el("raw-text-input").value = sc.rawText;
+        });
+        scenList.appendChild(btn);
+        if (index === 0 && el("raw-text-input")) {
+          el("raw-text-input").value = sc.rawText;
+        }
       });
-      scenList.appendChild(btn);
-      if (index === 0) {
-        el("raw-text-input").value = sc.rawText;
-      }
-    });
+    }
   } catch (err) {
     showError(err.message, "Setup Error");
   }
 
-  // Extract button
-  el("btn-extract").addEventListener("click", async () => {
+  // Extract button (guards against silently discarding Step 2 edits)
+  el("btn-extract")?.addEventListener("click", async () => {
+    if (!confirmDiscardIfDirty()) return;
     try {
       showError(null);
       const rawText = el("raw-text-input").value;
@@ -748,13 +912,15 @@ async function init() {
   );
 
   // Add line item button
-  el("btn-add-item").addEventListener("click", () => {
+  el("btn-add-item")?.addEventListener("click", () => {
     if (!currentSession || currentSession.flow.stage !== "proposed") return;
     editableItems.push({
       name: `Deliverable ${editableItems.length + 1}`,
       quantity: "1",
       unitPrice: "0.00",
       sourceSpan: null,
+      isAmbiguous: false,
+      clarificationQuestion: null,
     });
     renderLineItems(false);
     setFormDirty(true);
@@ -763,7 +929,7 @@ async function init() {
   });
 
   // Save draft edits explicitly
-  el("draft-form").addEventListener("submit", async (e) => {
+  el("draft-form")?.addEventListener("submit", async (e) => {
     e.preventDefault();
     if (!currentSession) return;
     try {
@@ -775,7 +941,7 @@ async function init() {
   });
 
   // Gate 1: Auto-save any unsaved form edits first, then Approve & Create Draft
-  el("btn-approve-draft").addEventListener("click", async () => {
+  el("btn-approve-draft")?.addEventListener("click", async () => {
     if (!currentSession) return;
     try {
       showError(null);
@@ -792,43 +958,21 @@ async function init() {
     }
   });
 
-  // Gate 2 Step A: Open confirmation summary before sending
-  el("btn-approve-send").addEventListener("click", () => {
-    if (!currentSession || currentSession.flow.stage !== "draft_created") return;
-    const d = currentSession.draft;
-    const currCode = d.currency.value || "USD";
-    const sym = getCurrencySymbol(currCode);
-    const total = computeInvoiceTotal();
-
-    const recipientText = d.recipientName.value
-      ? `${d.recipientName.value} (${d.recipientEmail.value})`
-      : d.recipientEmail.value || "—";
-    const termsText = d.dueDate.value
-      ? `Due on ${d.dueDate.value}`
-      : TERM_LABELS[d.paymentTerm.value] || d.paymentTerm.value || "—";
-
-    el("confirm-recipient").textContent = recipientText;
-    el("confirm-amount").textContent = `${currCode} ${sym}${total.toFixed(2)} (${editableItems.length} item${
-      editableItems.length === 1 ? "" : "s"
-    })`;
-    el("confirm-terms").textContent = termsText;
-
-    el("btn-approve-send").classList.add("hidden");
-    el("gate2-confirm-box").classList.remove("hidden");
-    el("btn-confirm-send").focus();
+  // Gate 2 Step A: Open native <dialog> confirmation summary before sending
+  el("btn-approve-send")?.addEventListener("click", () => {
+    openGate2ConfirmDialog();
   });
 
   // Gate 2 Step B1: Cancel sending
-  el("btn-cancel-send").addEventListener("click", () => {
-    el("gate2-confirm-box").classList.add("hidden");
-    el("btn-approve-send").classList.remove("hidden");
-    el("btn-approve-send").focus();
+  el("btn-cancel-send")?.addEventListener("click", () => {
+    closeGate2ConfirmDialog();
   });
 
   // Gate 2 Step B2: Confirm & Send Invoice Now
-  el("btn-confirm-send").addEventListener("click", async () => {
+  el("btn-confirm-send")?.addEventListener("click", async () => {
     if (!currentSession) return;
     try {
+      closeGate2ConfirmDialog();
       showError(null);
       const updated = await apiCall(
         `/api/sessions/${currentSession.id}/approve-send`,
@@ -841,7 +985,7 @@ async function init() {
   });
 
   // Refresh Status
-  el("btn-refresh-status").addEventListener("click", async () => {
+  el("btn-refresh-status")?.addEventListener("click", async () => {
     if (!currentSession) return;
     try {
       showError(null);
@@ -856,7 +1000,7 @@ async function init() {
   });
 
   // Simulate Sandbox Buyer Payment
-  el("btn-simulate-pay").addEventListener("click", async () => {
+  el("btn-simulate-pay")?.addEventListener("click", async () => {
     if (!currentSession) return;
     try {
       showError(null);
@@ -870,16 +1014,18 @@ async function init() {
     }
   });
 
-  // Highlight quote on field click/focus/hover
-  document.querySelectorAll("[data-field]").forEach((node) => {
-    const setField = () => {
-      activeHighlightField = node.getAttribute("data-field");
-      renderProvenanceHighlight();
-    };
-    node.addEventListener("click", setField);
-    node.addEventListener("mouseenter", setField);
-    node.addEventListener("focusin", setField);
-  });
+  // Highlight quote on field focus/click (no mouseenter re-render thrashing)
+  if (typeof document !== "undefined") {
+    document.querySelectorAll("[data-field]").forEach((node) => {
+      const setField = () => {
+        setActiveHighlightField(node.getAttribute("data-field"));
+      };
+      node.addEventListener("click", setField);
+      node.addEventListener("focusin", setField);
+    });
+  }
 }
 
-init();
+if (typeof document !== "undefined" && !globalThis.__SKIP_AUTO_INIT__) {
+  init();
+}

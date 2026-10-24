@@ -214,4 +214,82 @@ describe("InvoiceWorkflowService — Guarded Two-Step Approval Orchestrator", ()
     const afterPay = await service.simulateSandboxPayment(session.id);
     expect(afterPay.paypalInvoice?.status).toBe("PAID");
   });
+
+  it("preserves the correct item sourceSpan when item 1 of 2 is removed, and clears sourceSpan when an item is edited", async () => {
+    const service = new InvoiceWorkflowService({
+      extractor: new DeterministicExtractor(),
+      paypal: new RecordedPayPalGateway(),
+      extractionMode: "deterministic",
+      paypalMode: "recorded_sandbox",
+    });
+
+    const session = await service.createSessionFromText(`Hi Alex, project wrap-up:
+1. Landing page design: $650 USD
+2. Interactive prototype: $250 USD
+Send invoice to alex@brightlabs.test Net 14.`);
+
+    expect(session.draft.items).toHaveLength(2);
+    const item2OriginalSpan = session.draft.items[1].sourceSpan;
+    expect(item2OriginalSpan?.text).toContain("Interactive prototype: $250 USD");
+
+    // Remove item 1 (index 0), keeping only item 2
+    const afterRemove = service.updateDraft(session.id, {
+      items: [
+        {
+          name: session.draft.items[1].name,
+          quantity: session.draft.items[1].quantity,
+          unitPrice: session.draft.items[1].unit_amount.value,
+          sourceSpan: item2OriginalSpan,
+        },
+      ],
+    });
+
+    expect(afterRemove.draft.items).toHaveLength(1);
+    expect(afterRemove.draft.items[0].name).toBe("Interactive prototype");
+    // Must retain item 2's span, NOT item 1's span!
+    expect(afterRemove.draft.items[0].sourceSpan?.text).toContain("Interactive prototype: $250 USD");
+
+    // Now edit the price of the remaining item: sourceSpan must be cleared because user modified it
+    const afterEdit = service.updateDraft(session.id, {
+      items: [
+        {
+          name: "Interactive prototype",
+          quantity: "1",
+          unitPrice: "300",
+          sourceSpan: item2OriginalSpan,
+        },
+      ],
+    });
+    expect(afterEdit.draft.items[0].sourceSpan).toBeNull();
+  });
+
+  it("enforces quantity > 0 and rejects ambiguous list items on the server before Gate 1 approval", async () => {
+    const service = new InvoiceWorkflowService({
+      extractor: new DeterministicExtractor(),
+      paypal: new RecordedPayPalGateway(),
+      extractionMode: "deterministic",
+      paypalMode: "recorded_sandbox",
+    });
+
+    const session = await service.createSessionFromText(`Hi Alex:
+1. Landing page: $500 USD
+2. Hosting: $20/month
+Send to alex@brightlabs.test Net 14.`);
+
+    // Unresolved ambiguous line item #2 blocks Gate 1 and surfaces in unresolvedQuestions
+    expect(session.unresolvedQuestions.some((q) => q.field.startsWith("items"))).toBe(true);
+    await expect(service.approveAndCreateDraft(session.id)).rejects.toThrow(/ambiguous|clarification/i);
+
+    // Setting quantity to 0 must also be rejected by Gate 1
+    service.updateDraft(session.id, {
+      items: [
+        {
+          name: "Landing page",
+          quantity: "0",
+          unitPrice: "500",
+        },
+      ],
+    });
+    await expect(service.approveAndCreateDraft(session.id)).rejects.toThrow(/quantity/i);
+  });
 });

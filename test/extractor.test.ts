@@ -95,4 +95,31 @@ Please send the invoice to alex@brightlabs.test under Net 14.`;
     expect(draft.items[1].name).toBe("Interactive prototype & icon set");
     expect(draft.items[1].unit_amount.value).toBe("250");
   });
+
+  it("flags unparsed or recurring list lines as ambiguous items instead of silently dropping them", async () => {
+    const rawText = `Hi Alex, here is the breakdown:
+1. Landing page design: $500 USD
+2. Managed hosting: $20/month
+3. Two rounds of revisions: included
+Send invoice to alex@brightlabs.test Net 14.`;
+
+    const extractor = new DeterministicExtractor();
+    const draft = await extractor.extractInvoice(rawText);
+
+    // Must not silently drop lines 2 and 3
+    expect(draft.items).toHaveLength(3);
+    expect(draft.items[0].isAmbiguous).toBeFalsy();
+    expect(draft.items[0].unit_amount.value).toBe("500");
+
+    expect(draft.items[1].name).toContain("Managed hosting");
+    expect(draft.items[1].isAmbiguous).toBe(true);
+    expect(draft.items[1].clarificationQuestion).toMatch(/hosting/i);
+
+    expect(draft.items[2].name).toContain("Two rounds of revisions");
+    expect(draft.items[2].isAmbiguous).toBe(true);
+    expect(draft.items[2].clarificationQuestion).toMatch(/revisions/i);
+
+    // Formatting PayPal payload must fail while ambiguous items remain unresolved
+    expect(() => formatPayPalInvoiceV2Payload(draft)).toThrow(/clarification|greater than 0/i);
+  });
 });

@@ -16,7 +16,7 @@
   --red-border: #e74c3c;
   --red-text: #962317;
   --slate-locked-bg: #f1f5f9;
-  --slate-locked-text: #64748b;
+  --slate-locked-text: #334155;
   --slate-locked-border: #cbd5e1;
 }
 
@@ -105,15 +105,18 @@ body {
   color: #0e3866;
 }
 
-/* Global workspace-wide alert banner */
+/* Sticky top-level workspace alert banner (does not jump scroll position) */
 .alert-container {
+  position: sticky;
+  top: 8px;
+  z-index: 50;
   max-width: 1560px;
   margin: 0 auto;
   padding: 0 24px;
 }
 
 .error-toast {
-  margin-top: 14px;
+  margin-top: 10px;
   background: var(--red-bg);
   border: 1px solid var(--red-border);
   border-left: 5px solid var(--red-border);
@@ -126,7 +129,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  box-shadow: 0 2px 8px rgba(150, 35, 23, 0.12);
+  box-shadow: 0 4px 12px rgba(150, 35, 23, 0.16);
 }
 
 .error-toast-body {
@@ -175,13 +178,6 @@ body {
   margin: 0 auto;
 }
 
-/* Prevent cramped Step 2 two-column rows between 1100px and 1400px */
-@media (max-width: 1400px) {
-  .form-row {
-    grid-template-columns: 1fr !important;
-  }
-}
-
 @media (max-width: 1100px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -189,6 +185,7 @@ body {
 }
 
 .panel {
+  container-type: inline-size;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -289,7 +286,7 @@ select:focus {
   border-color: transparent;
 }
 
-/* Explicit read-only / disabled styling after Gate 1 */
+/* Explicit read-only / disabled styling after Gate 1 (#334155 on #f1f5f9 = 8.4:1 contrast, passing WCAG AA & AAA) */
 textarea:disabled,
 input:disabled,
 select:disabled {
@@ -487,6 +484,12 @@ select:disabled {
   gap: 10px;
 }
 
+@container (max-width: 440px) {
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .form-group {
   display: flex;
   flex-direction: column;
@@ -496,7 +499,8 @@ select:disabled {
   border: 1px solid transparent;
 }
 
-.form-group.ambiguous-field {
+.form-group.ambiguous-field,
+.line-item-card.ambiguous-field {
   background: var(--amber-bg);
   border-color: var(--amber-border);
 }
@@ -545,6 +549,7 @@ select:disabled {
 }
 
 .line-items-section {
+  container-type: inline-size;
   background: #f8fafd;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -582,6 +587,7 @@ select:disabled {
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .line-item-index {
@@ -590,16 +596,24 @@ select:disabled {
   color: var(--muted);
 }
 
+/* Container-aware line-item grid: stacks Deliverable Description on top in narrow cards (~250px) so it never overflows */
 .item-grid {
   display: grid;
-  grid-template-columns: minmax(140px, 2fr) 74px minmax(120px, 1fr);
+  grid-template-columns: 84px minmax(0, 1fr);
   gap: 8px;
   align-items: end;
 }
 
-@media (max-width: 560px) {
+.item-field-name {
+  grid-column: 1 / -1;
+}
+
+@container (min-width: 420px) {
   .item-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(140px, 2fr) 80px minmax(120px, 1fr);
+  }
+  .item-field-name {
+    grid-column: auto;
   }
 }
 
@@ -641,6 +655,7 @@ select:disabled {
   border: none;
   border-radius: 0;
   padding: 9px 9px;
+  min-width: 0;
 }
 
 .currency-input-wrap input:focus {
@@ -759,26 +774,37 @@ select:disabled {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* Gate 2 confirmation step */
-.gate-confirm-box {
-  background: #fff;
+/* Native <dialog> modal for Gate 2 confirmation */
+.gate-confirm-dialog {
   border: 2px solid #0d7a3e;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 18px;
+  max-width: 440px;
+  width: calc(100% - 32px);
+  background: #fff;
+  color: var(--text);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.25);
+}
+
+.gate-confirm-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.gate-confirm-content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
 .gate-confirm-title {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #0d7a3e;
 }
 
 .gate-confirm-note {
   margin: 0;
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--muted);
 }
 
@@ -786,18 +812,18 @@ select:disabled {
   margin: 0;
   background: #f8fafd;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 12.5px;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .gate-confirm-summary > div {
   display: flex;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
 }
 
 .gate-confirm-summary dt {
@@ -814,7 +840,9 @@ select:disabled {
 .gate-confirm-actions {
   display: flex;
   gap: 8px;
+  justify-content: flex-end;
   flex-wrap: wrap;
+  margin-top: 4px;
 }
 
 .paypal-truth-card {
