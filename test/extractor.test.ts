@@ -122,4 +122,25 @@ Send invoice to alex@brightlabs.test Net 14.`;
     // Formatting PayPal payload must fail while ambiguous items remain unresolved
     expect(() => formatPayPalInvoiceV2Payload(draft)).toThrow(/clarification|greater than 0/i);
   });
+
+  it("extracts explicit ISO (YYYY-MM-DD) or English due dates with provenance span and resolves date ambiguity", async () => {
+    const extractor = new DeterministicExtractor();
+
+    const isoDraft = await extractor.extractInvoice(
+      "Hi Alex, invoice $850 USD to alex@brightlabs.test due by 2026-11-15."
+    );
+    expect(isoDraft.dueDate.value).toBe("2026-11-15");
+    expect(isoDraft.dueDate.sourceSpan?.text).toBe("2026-11-15");
+    expect(isoDraft.dueDate.isAmbiguous).toBe(false);
+    expect(isoDraft.paymentTerm.isAmbiguous).toBe(false);
+    expect(() => formatPayPalInvoiceV2Payload(isoDraft)).not.toThrow();
+
+    const englishDraft = await extractor.extractInvoice(
+      "Hi Maya, total is $600 USD to maya@studio.test, due on Nov 5, 2026."
+    );
+    expect(englishDraft.dueDate.value).toBe("2026-11-05");
+    expect(englishDraft.dueDate.sourceSpan?.text).toBe("Nov 5, 2026");
+    expect(englishDraft.dueDate.isAmbiguous).toBe(false);
+    expect(englishDraft.paymentTerm.isAmbiguous).toBe(false);
+  });
 });

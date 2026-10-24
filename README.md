@@ -9,12 +9,12 @@ Freelancers often agree on project scope and pricing in informal client messages
 ## Key Differentiators
 
 1. **Provenance Spans & Zero Guessing (`src/extractor.ts`, `src/aiExtractor.ts`, `src/schema.ts`):**
-   - Every extracted field (`recipientEmail`, `recipientName`, `currency`, `paymentTerm`, `dueDate`, `items`) is mapped to its exact character offset (`sourceSpan: { start, end, text }`) in the original pasted message.
-   - Missing or ambiguous fields are **never guessed**; they are surfaced as explicit clarification questions that must be resolved before draft creation.
+   - Every extracted field (`recipientEmail`, `recipientName`, `currency`, `paymentTerm`, `dueDate`, and multi-deliverable `items`) is mapped to its exact character offset (`sourceSpan: { start, end, text }`) in the original pasted message.
+   - Missing or ambiguous fields (including unpriced or recurring list items such as `"$20/month"` or `"included"`) are **never guessed or silently dropped**; they are surfaced as explicit clarification items that must be resolved before draft creation.
 2. **Enforced Two-Step Approval Gate (`src/approval.ts`, `src/workflow.ts`):**
-   - **Gate 1 (Create Draft):** Approving draft creation calls `POST /v2/invoicing/invoices` to create an editable PayPal draft (`DRAFT`). It never emails the client.
-   - **Gate 2 (Send Invoice):** Sending requires an existing draft and a second, separate human approval before calling `POST /v2/invoicing/invoices/{id}/send`.
-   - `InvoiceWorkflowService` enforces both gates on the backend—neither the UI nor API callers can skip Gate 1 or trigger Gate 2 with unresolved required fields.
+   - **Gate 1 (Create Draft):** Auto-saves any pending form edits, validates all required fields and line items, and calls `POST /v2/invoicing/invoices` with a deterministic `PayPal-Request-Id` idempotency key to create an editable PayPal draft (`DRAFT`). It never emails the client.
+   - **Gate 2 (Send Invoice):** Requires an existing draft and a second, separate human confirmation dialog before calling `POST /v2/invoicing/invoices/{id}/send`.
+   - `InvoiceWorkflowService` enforces both gates on the backend with per-session concurrency locks—neither the UI nor API callers can skip Gate 1, double-submit, or trigger Gate 2 with unresolved required fields.
 3. **PayPal System-of-Record Status (`src/paypal.ts`):**
    - Displays PayPal's invoice status (`DRAFT`, `SENT`, `PAID`) and hosted invoice links verbatim from the API response without inventing custom payment states.
 
@@ -28,7 +28,7 @@ Freelancers often agree on project scope and pricing in informal client messages
 ### 1. Install & Run Tests
 ```bash
 npm install
-npm test          # Runs 20 unit & HTTP integration tests across 6 suites
+npm test          # Runs 37 unit, UI & HTTP integration tests across 7 suites
 npm run typecheck # Zero-error TypeScript check
 ```
 
@@ -36,7 +36,7 @@ npm run typecheck # Zero-error TypeScript check
 ```bash
 npm start
 ```
-Then open **<http://localhost:3000>** in your browser.
+Then open **<http://127.0.0.1:3000>** (or **<http://localhost:3000>**) in your browser.
 
 > **Runs out-of-the-box without paid keys:**
 > - If `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` are not set, the app runs in a clearly labeled **Recorded Sandbox Simulation Mode** (`RecordedPayPalGateway`) so judges can test the full *Extract → Clarify → Gate 1 (Draft) → Gate 2 (Send) → Simulate Buyer Payment (`PAID`)* flow immediately.
@@ -61,7 +61,7 @@ export OPENAI_MODEL="gpt-4o-mini"
 npm start
 ```
 
-When credentials are provided, the header badges in the Web UI automatically switch to **`Extraction: LIVE AI`** and **`PayPal: LIVE SANDBOX API`**.
+When credentials are provided, the header badges in the Web UI automatically switch to **`Extraction: AI Model (OpenAI)`** and **`PayPal: Connected to Sandbox`**.
 
 ---
 
@@ -69,9 +69,9 @@ When credentials are provided, the header badges in the Web UI automatically swi
 
 | Command | Description |
 | --- | --- |
-| `npm start` | Starts the Web UI and guarded HTTP API server on `http://localhost:3000` |
+| `npm start` | Starts the Web UI and guarded HTTP API server on `http://127.0.0.1:3000` |
 | `npm run dev` | Starts the server in watch mode |
-| `npm test` | Runs all 6 Vitest unit & integration test suites (`approval`, `extractor`, `aiExtractor`, `paypal`, `workflow`, `server`) |
+| `npm test` | Runs all 7 Vitest unit, UI & integration test suites (`approval`, `extractor`, `aiExtractor`, `paypal`, `workflow`, `server`, `ui`) |
 | `npm run typecheck` | Runs `tsc -p .` static type checking |
 | `npm run demo` | Interactive terminal CLI walkthrough of extraction + two-step approval |
 | `npm run spike` | Live PayPal Sandbox round-trip script: create draft &rarr; fetch &rarr; send (requires sandbox credentials) |
@@ -89,11 +89,12 @@ src/
   approval.ts      Pure two-step approval state machine (proposed -> draft_created -> sent)
   paypal.ts        PayPal Invoicing v2 REST client (OAuth 2.0 + sandbox-by-default guardrail)
   workflow.ts      Guarded InvoiceWorkflowService orchestrator + RecordedPayPalGateway
-  server.ts        Zero-dependency Node.js HTTP server for REST API + Web UI
+  server.ts        Zero-dependency Node.js HTTP server for REST API + Web UI (bound to 127.0.0.1)
 public/
   index.html       3-step Single-Page Web UI (Source Provenance, Review Form, Approval Gates)
-  styles.css       Responsive UI styling
-  app.js           Frontend state, span highlighter, and API integration
+  styles.css       Responsive UI styling with CSS container queries & WCAG AA contrast
+  app.js           Frontend state, span highlighter, multi-item editor, and API integration
+  app.d.ts         TypeScript declarations for UI controller functions
 scripts/
   demoCli.ts       Interactive local CLI demo
   spike.ts         PayPal Sandbox create -> send round-trip script
@@ -105,6 +106,7 @@ test/
   paypal.test.ts
   workflow.test.ts
   server.test.ts
+  ui.test.ts
 docs/
   api-verification.md
 ```

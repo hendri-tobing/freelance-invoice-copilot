@@ -162,10 +162,38 @@ export class DeterministicExtractor implements ExtractionProvider {
     // 5. Due date / payment term (never silently invent NET_14 when missing)
     let paymentTerm: ExtractedInvoiceDraft["paymentTerm"]["value"] = null;
     let termSpan: SourceSpan | null = null;
-    const dueDateVal: string | null = null;
-    const dueDateSpan: SourceSpan | null = null;
+    let dueDateVal: string | null = null;
+    let dueDateSpan: SourceSpan | null = null;
     let dateAmbiguous = false;
     let dateQuestion: string | null = null;
+
+    const isoDateMatch = rawText.match(/\b(20\d{2}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01]))\b/);
+    const englishDateMatch = rawText.match(
+      /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b/i
+    );
+    if (isoDateMatch) {
+      dueDateVal = isoDateMatch[1];
+      dueDateSpan = findExactSpan(rawText, isoDateMatch[1]);
+    } else if (englishDateMatch) {
+      const monthMap: Record<string, string> = {
+        jan: "01",
+        feb: "02",
+        mar: "03",
+        apr: "04",
+        may: "05",
+        jun: "06",
+        jul: "07",
+        aug: "08",
+        sep: "09",
+        oct: "10",
+        nov: "11",
+        dec: "12",
+      };
+      const mKey = englishDateMatch[1].slice(0, 3).toLowerCase();
+      const dayPadded = englishDateMatch[2].padStart(2, "0");
+      dueDateVal = `${englishDateMatch[3]}-${monthMap[mKey]}-${dayPadded}`;
+      dueDateSpan = findExactSpan(rawText, englishDateMatch[0]);
+    }
 
     const termMatch = rawText.match(/net\s*(10|14|15|30|45|60)/i);
     const receiptMatch = rawText.match(/due\s+on\s+receipt/i);
@@ -175,10 +203,12 @@ export class DeterministicExtractor implements ExtractionProvider {
     } else if (receiptMatch) {
       paymentTerm = "DUE_ON_RECEIPT";
       termSpan = findExactSpan(rawText, receiptMatch[0]);
-    } else {
+    } else if (!dueDateVal) {
       dateAmbiguous = true;
       dateQuestion = "What is the payment term or due date for this invoice?";
     }
+
+    const hasResolvedTermOrDate = Boolean(paymentTerm || dueDateVal);
 
     const draftData: ExtractedInvoiceDraft = {
       recipientEmail: {
@@ -202,8 +232,8 @@ export class DeterministicExtractor implements ExtractionProvider {
       paymentTerm: {
         value: paymentTerm,
         sourceSpan: termSpan,
-        isAmbiguous: !paymentTerm,
-        clarificationQuestion: paymentTerm
+        isAmbiguous: !hasResolvedTermOrDate,
+        clarificationQuestion: hasResolvedTermOrDate
           ? null
           : "Specify payment term (e.g. NET_14, NET_30, DUE_ON_RECEIPT)?",
       },
