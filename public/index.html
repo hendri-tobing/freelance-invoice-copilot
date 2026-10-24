@@ -9,92 +9,116 @@
 <body>
   <header class="topbar">
     <div class="topbar-brand">
-      <div class="logo-mark">PP</div>
+      <div class="logo-mark" aria-hidden="true">PP</div>
       <div>
         <h1>Freelance Invoice Copilot</h1>
-        <p class="subtitle">Turn informal client agreements into verified PayPal invoices with provenance spans &amp; two-step human approval</p>
+        <p class="subtitle">Turn client project notes into verified PayPal invoices with source quotes &amp; two-step human approval</p>
       </div>
     </div>
-    <div class="mode-badges">
+    <div class="mode-badges" aria-live="polite">
       <span id="badge-extraction" class="mode-badge">Extraction: Loading...</span>
       <span id="badge-paypal" class="mode-badge">PayPal: Loading...</span>
     </div>
   </header>
 
   <div class="privacy-banner">
-    <strong>Privacy &amp; Safety Notice:</strong> Use fictional or redacted project notes only. Every PayPal action is gated by two separate human approvals (Gate 1: Draft Creation, Gate 2: Send to Client).
+    <strong>Privacy &amp; Safety Notice:</strong> Use fictional or redacted project notes only. Every PayPal action requires two separate approvals (Gate 1: Create Draft, Gate 2: Send to Client).
+  </div>
+
+  <!-- Top-level workspace alert banner visible across all columns -->
+  <div class="alert-container">
+    <div id="error-toast" class="error-toast hidden" role="alert" aria-live="assertive">
+      <div class="error-toast-body">
+        <span id="error-toast-context" class="error-toast-badge">Error</span>
+        <span id="error-toast-msg"></span>
+      </div>
+      <button type="button" id="error-toast-close" class="error-toast-close" aria-label="Dismiss error">
+        &times;
+      </button>
+    </div>
   </div>
 
   <main class="workspace-grid">
-    <!-- COLUMN 1: SOURCE AGREEMENT & PROVENANCE -->
-    <section class="panel" id="panel-source">
+    <!-- COLUMN 1: SOURCE AGREEMENT & QUOTES -->
+    <section class="panel" id="panel-source" aria-labelledby="heading-step1">
       <div class="panel-header">
         <span class="step-pill">Step 1</span>
-        <h2>Client Agreement &amp; Provenance</h2>
+        <h2 id="heading-step1">Client Message &amp; Source Quotes</h2>
       </div>
 
       <div class="scenarios-box">
-        <label class="section-label">Load Fictional Demo Scenario:</label>
-        <div id="scenario-buttons" class="scenario-list"></div>
+        <span class="section-label" id="scenario-group-label">Load Sample Demo Scenario:</span>
+        <div id="scenario-buttons" class="scenario-list" role="group" aria-labelledby="scenario-group-label"></div>
       </div>
 
       <label class="section-label" for="raw-text-input">Pasted Client Message / Scope Note:</label>
       <textarea
         id="raw-text-input"
         rows="6"
-        placeholder="Paste a fictional client message here..."
+        placeholder="Paste a fictional client message or scope agreement here..."
       ></textarea>
 
       <div class="action-row">
-        <button id="btn-extract" class="btn btn-primary">
-          Extract Invoice Fields &amp; Provenance Spans
+        <button type="button" id="btn-extract" class="btn btn-primary btn-block">
+          Extract Invoice Details
         </button>
       </div>
 
       <div id="provenance-box" class="provenance-box hidden">
         <div class="provenance-header">
-          <span class="section-label">Exact Source Span Provenance Map</span>
-          <span class="provenance-hint">Click any field in Step 2 to highlight its exact character span</span>
+          <span class="section-label">Highlighted Quotes from Client Message</span>
+          <span class="provenance-hint">Select any field in Step 2 or click a highlighted quote below to link source text</span>
         </div>
-        <div id="highlighted-source" class="highlighted-source"></div>
-        <div id="active-span-meta" class="active-span-meta">
-          Hover or focus an extracted field to inspect exact character offsets.
+        <div id="highlighted-source" class="highlighted-source" role="region" aria-label="Client message with highlighted quotes"></div>
+        <div id="active-span-meta" class="active-span-meta" aria-live="polite">
+          Select a field or click a highlighted quote to see which detail it matched.
         </div>
       </div>
     </section>
 
-    <!-- COLUMN 2: REVIEW, CLARIFICATIONS & EDIT -->
-    <section class="panel" id="panel-review">
+    <!-- COLUMN 2: REVIEW, MISSING DETAILS & EDIT -->
+    <section class="panel" id="panel-review" aria-labelledby="heading-step2">
       <div class="panel-header">
         <span class="step-pill">Step 2</span>
-        <h2>Review Draft &amp; Resolve Ambiguities</h2>
+        <h2 id="heading-step2">Review &amp; Complete Invoice Draft</h2>
       </div>
 
       <div id="review-empty" class="empty-state">
-        Extract a project message in Step 1 to inspect extracted fields, source quotes, and clarification questions.
+        Extract a client message in Step 1 to review extracted invoice details, source quotes, and any missing fields.
       </div>
 
       <div id="review-content" class="hidden">
-        <!-- Clarification Questions Banner -->
-        <div id="questions-banner" class="questions-banner hidden">
+        <!-- Locked Notice Banner (shown after Gate 1 creates the PayPal draft) -->
+        <div id="locked-banner" class="locked-banner hidden" aria-live="polite">
+          <strong>Draft Locked:</strong> A PayPal draft invoice has been created for this session. Fields are now read-only.
+        </div>
+
+        <!-- Missing / Unclear Fields Banner -->
+        <div id="questions-banner" class="questions-banner hidden" aria-live="polite">
           <div class="questions-title">
-            Clarification Needed (AI Never Guesses Missing/Ambiguous Fields)
+            Missing or Unclear Details — Please Complete Below
           </div>
           <ul id="questions-list"></ul>
         </div>
 
-        <div id="resolved-banner" class="resolved-banner hidden">
-          All required invoice fields are verified and unambiguous. Ready for Gate 1 approval.
+        <div id="resolved-banner" class="resolved-banner hidden" aria-live="polite">
+          All required invoice details are complete. Ready for Gate 1 approval.
         </div>
 
-        <form id="draft-form" class="draft-form">
+        <form id="draft-form" class="draft-form" novalidate>
           <div class="form-row">
             <div class="form-group" data-field="recipientEmail">
               <div class="field-label-row">
-                <label for="input-email">Client Billing Email <span class="req">*</span></label>
+                <label for="input-email">Client Billing Email <span class="req" aria-hidden="true">*</span></label>
                 <span id="span-tag-recipientEmail" class="span-tag"></span>
               </div>
-              <input type="email" id="input-email" required placeholder="e.g. client@company.test" />
+              <input
+                type="email"
+                id="input-email"
+                required
+                placeholder="e.g. client@company.test"
+                aria-describedby="span-tag-recipientEmail"
+              />
             </div>
 
             <div class="form-group" data-field="recipientName">
@@ -102,17 +126,22 @@
                 <label for="input-name">Client Name</label>
                 <span id="span-tag-recipientName" class="span-tag"></span>
               </div>
-              <input type="text" id="input-name" placeholder="e.g. Maya" />
+              <input
+                type="text"
+                id="input-name"
+                placeholder="e.g. Maya"
+                aria-describedby="span-tag-recipientName"
+              />
             </div>
           </div>
 
           <div class="form-row">
             <div class="form-group" data-field="currency">
               <div class="field-label-row">
-                <label for="input-currency">Currency (ISO 4217) <span class="req">*</span></label>
+                <label for="input-currency">Currency <span class="req" aria-hidden="true">*</span></label>
                 <span id="span-tag-currency" class="span-tag"></span>
               </div>
-              <select id="input-currency">
+              <select id="input-currency" aria-describedby="span-tag-currency">
                 <option value="">-- Select Currency --</option>
                 <option value="USD">USD ($)</option>
                 <option value="EUR">EUR (€)</option>
@@ -124,18 +153,18 @@
 
             <div class="form-group" data-field="paymentTerm">
               <div class="field-label-row">
-                <label for="input-term">Payment Term <span class="req">*</span></label>
+                <label for="input-term">Payment Term <span class="req" aria-hidden="true">*</span></label>
                 <span id="span-tag-paymentTerm" class="span-tag"></span>
               </div>
-              <select id="input-term">
+              <select id="input-term" aria-describedby="span-tag-paymentTerm">
                 <option value="">-- Select Payment Term --</option>
-                <option value="DUE_ON_RECEIPT">DUE_ON_RECEIPT</option>
-                <option value="NET_10">NET_10</option>
-                <option value="NET_14">NET_14</option>
-                <option value="NET_15">NET_15</option>
-                <option value="NET_30">NET_30</option>
-                <option value="NET_45">NET_45</option>
-                <option value="NET_60">NET_60</option>
+                <option value="DUE_ON_RECEIPT">Due on Receipt</option>
+                <option value="NET_10">Net 10 (10 days)</option>
+                <option value="NET_14">Net 14 (14 days)</option>
+                <option value="NET_15">Net 15 (15 days)</option>
+                <option value="NET_30">Net 30 (30 days)</option>
+                <option value="NET_45">Net 45 (45 days)</option>
+                <option value="NET_60">Net 60 (60 days)</option>
               </select>
             </div>
           </div>
@@ -146,100 +175,140 @@
                 <label for="input-duedate">Optional Specific Due Date</label>
                 <span id="span-tag-dueDate" class="span-tag"></span>
               </div>
-              <input type="date" id="input-duedate" />
+              <input
+                type="date"
+                id="input-duedate"
+                placeholder="YYYY-MM-DD"
+                aria-describedby="span-tag-dueDate hint-duedate"
+              />
+              <small id="hint-duedate" class="field-hint">Format: YYYY-MM-DD (overrides Payment Term if set)</small>
             </div>
 
             <div class="form-group">
               <div class="field-label-row">
                 <label for="input-note">Invoice Note</label>
               </div>
-              <input type="text" id="input-note" placeholder="Note to recipient" />
+              <input type="text" id="input-note" placeholder="Note shown to recipient on invoice" />
             </div>
           </div>
 
           <div class="line-items-section" data-field="items">
-            <div class="field-label-row">
-              <label>Line Item Deliverable <span class="req">*</span></label>
-              <span id="span-tag-items" class="span-tag"></span>
+            <div class="field-label-row line-items-header">
+              <div>
+                <span class="line-items-title">Line Item Deliverables <span class="req" aria-hidden="true">*</span></span>
+                <span id="span-tag-items" class="span-tag"></span>
+              </div>
+              <button type="button" id="btn-add-item" class="btn btn-small">
+                + Add Line Item
+              </button>
             </div>
-            <div class="item-grid">
-              <div>
-                <small>Deliverable Name</small>
-                <input type="text" id="input-item-name" required />
-              </div>
-              <div>
-                <small>Qty</small>
-                <input type="number" id="input-item-qty" min="1" step="1" value="1" required />
-              </div>
-              <div>
-                <small>Unit Amount</small>
-                <input type="number" id="input-item-price" min="0.01" step="0.01" required />
-              </div>
+
+            <div id="line-items-list" class="line-items-list"></div>
+
+            <div class="invoice-total-row" aria-live="polite">
+              <span>Invoice Total:</span>
+              <strong id="invoice-total-display">USD $0.00</strong>
             </div>
           </div>
 
-          <div class="action-row">
+          <div class="form-footer">
             <button type="submit" id="btn-save-draft" class="btn btn-secondary">
-              Save Corrections &amp; Re-validate Draft
+              Save Changes
             </button>
+            <span id="dirty-indicator" class="dirty-indicator hidden" aria-live="polite">
+              Unsaved edits — will also auto-save when you approve Gate 1
+            </span>
           </div>
         </form>
       </div>
     </section>
 
-    <!-- COLUMN 3: TWO-STEP APPROVAL GATE & PAYPAL TRUTH -->
-    <section class="panel" id="panel-approval">
+    <!-- COLUMN 3: TWO-STEP APPROVAL GATE & PAYPAL STATUS -->
+    <section class="panel" id="panel-approval" aria-labelledby="heading-step3">
       <div class="panel-header">
         <span class="step-pill">Step 3</span>
-        <h2>Two-Step Approval &amp; PayPal Status</h2>
+        <h2 id="heading-step3">Two-Step Approval &amp; PayPal Status</h2>
       </div>
 
       <!-- Flow Stage Stepper -->
-      <div class="stage-stepper">
-        <div id="step-proposed" class="stage-node">1. Proposed</div>
-        <div class="stage-arrow">&rarr;</div>
-        <div id="step-draft_created" class="stage-node">2. Draft Created</div>
-        <div class="stage-arrow">&rarr;</div>
-        <div id="step-sent" class="stage-node">3. Sent</div>
+      <div class="stage-stepper" role="list" aria-label="Invoice approval progress">
+        <div id="step-proposed" class="stage-node" role="listitem">1. Proposed</div>
+        <div class="stage-arrow" aria-hidden="true">&rarr;</div>
+        <div id="step-draft_created" class="stage-node" role="listitem">2. Draft Created</div>
+        <div class="stage-arrow" aria-hidden="true">&rarr;</div>
+        <div id="step-sent" class="stage-node" role="listitem">3. Sent</div>
       </div>
-
-      <div id="error-toast" class="error-toast hidden"></div>
 
       <!-- Gate 1 Card -->
       <div class="gate-card" id="gate1-card">
         <div class="gate-card-header">
           <strong>Gate 1: Create PayPal Draft Invoice</strong>
-          <span id="gate1-status" class="gate-badge">Awaiting Approval</span>
+          <span id="gate1-status" class="gate-badge" aria-live="polite">Awaiting Extraction</span>
         </div>
         <p class="gate-desc">
-          Calls <code>POST /v2/invoicing/invoices</code>. Creates an editable draft in PayPal Sandbox. <strong>Does not email or notify the client.</strong>
+          Creates an editable draft invoice in PayPal Sandbox (<code>POST /v2/invoicing/invoices</code>). <strong>Does not email or notify the client.</strong>
         </p>
         <div id="gate1-timestamp" class="gate-timestamp hidden"></div>
-        <button id="btn-approve-draft" class="btn btn-gate1" disabled>
+        <button type="button" id="btn-approve-draft" class="btn btn-gate1 btn-block" disabled>
           Approve &amp; Create PayPal Draft
         </button>
+        <p id="gate1-reason" class="gate-reason" aria-live="polite">
+          Extract a client message in Step 1 to begin.
+        </p>
       </div>
 
       <!-- Gate 2 Card -->
       <div class="gate-card" id="gate2-card">
         <div class="gate-card-header">
           <strong>Gate 2: Send Invoice to Client</strong>
-          <span id="gate2-status" class="gate-badge">Locked (Requires Draft)</span>
+          <span id="gate2-status" class="gate-badge" aria-live="polite">Locked</span>
         </div>
         <p class="gate-desc">
-          Calls <code>POST /v2/invoicing/invoices/{id}/send</code>. Makes the invoice payable and sends the hosted payment link to the recipient.
+          Sends the payable invoice and hosted payment link to the recipient (<code>POST /v2/invoicing/invoices/{id}/send</code>).
         </p>
         <div id="gate2-timestamp" class="gate-timestamp hidden"></div>
-        <button id="btn-approve-send" class="btn btn-gate2" disabled>
-          Approve &amp; Send Invoice Now
+        <button type="button" id="btn-approve-send" class="btn btn-gate2 btn-block" disabled>
+          Review &amp; Send Invoice...
         </button>
+
+        <!-- Irreversible Action Confirmation Box -->
+        <div id="gate2-confirm-box" class="gate-confirm-box hidden" role="region" aria-label="Confirm sending invoice">
+          <div class="gate-confirm-title">Confirm Sending Invoice to Client</div>
+          <p class="gate-confirm-note">This action sends a live payment link to the recipient:</p>
+          <dl class="gate-confirm-summary">
+            <div>
+              <dt>Recipient:</dt>
+              <dd id="confirm-recipient">—</dd>
+            </div>
+            <div>
+              <dt>Total Amount:</dt>
+              <dd id="confirm-amount">—</dd>
+            </div>
+            <div>
+              <dt>Payment Terms:</dt>
+              <dd id="confirm-terms">—</dd>
+            </div>
+          </dl>
+          <div class="gate-confirm-actions">
+            <button type="button" id="btn-confirm-send" class="btn btn-gate2">
+              Confirm &amp; Send Invoice Now
+            </button>
+            <button type="button" id="btn-cancel-send" class="btn btn-small">
+              Cancel
+            </button>
+          </div>
+        </div>
+
+        <p id="gate2-reason" class="gate-reason" aria-live="polite">
+          Complete Gate 1 first to create the PayPal draft before sending.
+        </p>
       </div>
 
-      <!-- Verbatim PayPal Status Card -->
-      <div id="paypal-truth-card" class="paypal-truth-card hidden">
+      <!-- Live PayPal Status Card -->
+      <div id="paypal-truth-card" class="paypal-truth-card hidden" aria-live="polite">
         <div class="truth-header">
           <div>
-            <span class="section-label">PayPal System-of-Record Status</span>
+            <span class="section-label">Live PayPal Invoice Status</span>
             <div class="truth-id-row">
               Invoice ID: <code id="pp-invoice-id">—</code>
             </div>
@@ -254,24 +323,31 @@
         <div id="pp-links" class="pp-links"></div>
 
         <div class="truth-actions">
-          <button id="btn-refresh-status" class="btn btn-small">
+          <button type="button" id="btn-refresh-status" class="btn btn-small">
             Refresh Status from PayPal
           </button>
-          <button id="btn-simulate-pay" class="btn btn-small btn-pay hidden">
+          <button type="button" id="btn-simulate-pay" class="btn btn-small btn-pay hidden">
             Simulate Sandbox Buyer Payment &rarr; PAID
           </button>
         </div>
       </div>
 
-      <!-- Payload & Raw Response Inspector -->
+      <!-- Developer Payload, Offsets & Raw Response Inspector -->
       <details class="payload-inspector">
-        <summary>Inspect Formatted PayPal v2 Payload &amp; API Response</summary>
+        <summary>
+          <span class="dev-pill">Developer Only</span>
+          Inspect Raw PayPal v2 Payload, API Response &amp; Character Offsets
+        </summary>
+        <div class="inspector-block">
+          <small>Extracted Source Span Character Offsets:</small>
+          <pre id="pre-spans">No draft extracted yet.</pre>
+        </div>
         <div class="inspector-block">
           <small>POST /v2/invoicing/invoices Request Payload:</small>
           <pre id="pre-payload">No draft extracted yet.</pre>
         </div>
         <div class="inspector-block">
-          <small>Verbatim PayPal API Response:</small>
+          <small>Raw PayPal API Response:</small>
           <pre id="pre-response">No PayPal call executed yet.</pre>
         </div>
       </details>

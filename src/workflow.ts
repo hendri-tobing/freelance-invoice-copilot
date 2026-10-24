@@ -239,12 +239,13 @@ Please let me know if I should send the invoice to maya@techstudio.test when rea
   },
   {
     id: "missing-due-date",
-    title: "Scenario 2: Explicit USD, Missing Payment Term",
-    badge: "Flags 1 Question",
+    title: "Scenario 2: Multi-Item Agreement, Missing Payment Term",
+    badge: "2 Items • 1 Question",
     description:
-      "Clear USD amount and client email, but no due date or Net payment term stated in the chat.",
+      "Two numbered deliverables in USD with a client email, but no due date or Net payment term stated in the chat.",
     rawText: `Hi Alex, here is the project wrap-up:
 1. Landing page design & Framer handoff: $650 USD
+2. Interactive prototype & icon set: $250 USD
 I will prepare the invoice for alex@brightlabs.test.`,
   },
   {

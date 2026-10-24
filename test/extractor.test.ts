@@ -78,4 +78,21 @@ Please send invoice to alex@company.test`;
     expect(payload).toHaveProperty("items");
     expect((payload.items as any)[0].unit_amount.value).toBe("1200");
   });
+
+  it("extracts multiple line items from numbered or bulleted agreements", async () => {
+    const rawText = `Hi Alex, here is the project wrap-up:
+1. Landing page design & Framer handoff: $650 USD
+2. Interactive prototype & icon set: $250 USD
+Please send the invoice to alex@brightlabs.test under Net 14.`;
+
+    const extractor = new DeterministicExtractor();
+    const draft = await extractor.extractInvoice(rawText);
+
+    expect(draft.items).toHaveLength(2);
+    expect(draft.items[0].name).toBe("Landing page design & Framer handoff");
+    expect(draft.items[0].unit_amount.value).toBe("650");
+    expect(draft.items[0].sourceSpan?.text).toContain("Landing page design");
+    expect(draft.items[1].name).toBe("Interactive prototype & icon set");
+    expect(draft.items[1].unit_amount.value).toBe("250");
+  });
 });

@@ -81,8 +81,28 @@ export class DeterministicExtractor implements ExtractionProvider {
       currencyQuestion = "Which currency should be used for this invoice (e.g., USD, EUR, SGD)?";
     }
 
-    // 3. Amount / pricing extraction - support thousands commas (1,200 or 12,450.75)
+    // 3. Amount / pricing extraction - support thousands commas (1,200 or 12,450.75) and multi-line items
     const numPattern = "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)";
+    const lineItemRegex = new RegExp(
+      `^\\s*(?:\\d+[.)]|[-*•])\\s*(.+?)\\s*[:\\-–]\\s*(?:\\$|€|USD|EUR)?\\s*${numPattern}(?:\\s*(?:USD|EUR|\\$|€))?\\s*$`,
+      "gim"
+    );
+    const extractedItems: ExtractedInvoiceDraft["items"] = [];
+    for (const match of rawText.matchAll(lineItemRegex)) {
+      const fullLine = match[0].trim();
+      const itemName = match[1].trim();
+      const itemPrice = normalizeAmountString(match[2]);
+      extractedItems.push({
+        name: itemName || "Freelance Service Deliverable",
+        quantity: "1",
+        unit_amount: {
+          currency_code: currencyVal ?? "USD",
+          value: itemPrice,
+        },
+        sourceSpan: findExactSpan(rawText, fullLine),
+      });
+    }
+
     let amountVal = "0.00";
     let amountMatch = rawText.match(new RegExp(`(?:\\$|€|USD|EUR)\\s*${numPattern}`, "i"));
     if (!amountMatch) {
@@ -93,6 +113,17 @@ export class DeterministicExtractor implements ExtractionProvider {
     }
     if (amountMatch) {
       amountVal = normalizeAmountString(amountMatch[1]);
+    }
+    if (extractedItems.length === 0) {
+      extractedItems.push({
+        name: "Freelance Service Deliverable",
+        quantity: "1",
+        unit_amount: {
+          currency_code: currencyVal ?? "USD",
+          value: amountVal,
+        },
+        sourceSpan: amountMatch ? findExactSpan(rawText, amountMatch[0]) : null,
+      });
     }
 
     // 4. Client name heuristic (strictly capitalized name tokens; never match lowercase words like "due to the delay")
@@ -158,17 +189,7 @@ export class DeterministicExtractor implements ExtractionProvider {
         isAmbiguous: dateAmbiguous,
         clarificationQuestion: dateQuestion,
       },
-      items: [
-        {
-          name: "Freelance Service Deliverable",
-          quantity: "1",
-          unit_amount: {
-            currency_code: currencyVal ?? "USD",
-            value: amountVal,
-          },
-          sourceSpan: amountMatch ? findExactSpan(rawText, amountMatch[0]) : null,
-        },
-      ],
+      items: extractedItems,
       note: {
         value: "Payment request based on agreed scope.",
         sourceSpan: null,

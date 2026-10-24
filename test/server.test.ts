@@ -120,6 +120,22 @@ describe("HTTP API & Web UI Server (src/server.ts)", () => {
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("Freelance Invoice Copilot");
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("gate2-confirm-box");
+    expect(html).toContain("dirty-indicator");
+    expect(html).toContain("Developer Only");
+
+    const cssRes = await fetch(`${baseUrl}/styles.css`);
+    expect(cssRes.status).toBe(200);
+    const css = await cssRes.text();
+    expect(css).toContain("input:disabled");
+    expect(css).toContain(".currency-prefix");
+
+    const jsRes = await fetch(`${baseUrl}/app.js`);
+    expect(jsRes.status).toBe(200);
+    const js = await jsRes.text();
+    expect(js).toContain("saveDraftFromForm");
+    expect(js).toContain("editableItems");
 
     // Non-existent session returns 404 via NotFoundError
     const missingRes = await fetch(`${baseUrl}/api/sessions/non-existent-id`);
