@@ -1,0 +1,27 @@
+{
+  "name": "freelance-invoice-copilot",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "spike": "tsx scripts/spike.ts",
+    "status": "tsx scripts/status.ts",
+    "demo": "tsx scripts/demoCli.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  }
+}
