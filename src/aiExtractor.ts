@@ -1,9 +1,12 @@
 import {
   ExtractedInvoiceDraft,
   ExtractedInvoiceDraftSchema,
-  SourceSpan,
 } from "./schema.js";
-import { ExtractionProvider, findExactSpan } from "./extractor.js";
+import {
+  ExtractionProvider,
+  findExactSpan,
+  normalizeAmountString,
+} from "./extractor.js";
 
 export interface OpenAiCompatibleConfig {
   apiKey: string;
@@ -61,7 +64,15 @@ Do not invent or guess missing information. If something is missing, output null
     }
 
     const data = await response.json();
-    const parsed = JSON.parse(data.choices?.[0]?.message?.content ?? "{}");
+    const rawContent = data.choices?.[0]?.message?.content ?? "{}";
+    let parsed: Record<string, any>;
+    try {
+      parsed = JSON.parse(rawContent);
+    } catch (err) {
+      throw new Error(
+        `Failed to parse LLM extraction JSON: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
 
     const emailQuote = parsed.exactQuotes?.recipientEmail ?? parsed.recipientEmail;
     const nameQuote = parsed.exactQuotes?.recipientName ?? parsed.recipientName;
@@ -87,7 +98,7 @@ Do not invent or guess missing information. If something is missing, output null
         clarificationQuestion: !parsed.currency ? "Which currency should be charged (e.g. USD, EUR)?" : null,
       },
       paymentTerm: {
-        value: parsed.paymentTerm ?? "NET_14",
+        value: parsed.paymentTerm ?? null,
         sourceSpan: parsed.exactQuotes?.paymentTerm ? findExactSpan(rawText, parsed.exactQuotes.paymentTerm) : null,
         isAmbiguous: !parsed.paymentTerm,
         clarificationQuestion: !parsed.paymentTerm ? "Select payment term (e.g. NET_14, DUE_ON_RECEIPT)?" : null,
@@ -95,29 +106,33 @@ Do not invent or guess missing information. If something is missing, output null
       dueDate: {
         value: parsed.dueDate ?? null,
         sourceSpan: parsed.dueDate ? findExactSpan(rawText, parsed.dueDate) : null,
-        isAmbiguous: !parsed.dueDate,
-        clarificationQuestion: null,
+        isAmbiguous: !parsed.dueDate && !parsed.paymentTerm,
+        clarificationQuestion:
+          !parsed.dueDate && !parsed.paymentTerm
+            ? "What is the payment term or due date for this invoice?"
+            : null,
       },
-      items: (parsed.items && parsed.items.length > 0)
-        ? parsed.items.map((it: any) => ({
-            name: it.name || "Deliverable",
-            quantity: String(it.quantity || "1"),
-            unit_amount: {
-              currency_code: parsed.currency || "USD",
-              value: String(it.unitPrice || "0.00"),
-            },
-            sourceSpan: it.name ? findExactSpan(rawText, it.name) : null,
-          }))
-        : [
-            {
-              name: "Scope Work",
-              quantity: "1",
+      items:
+        parsed.items && parsed.items.length > 0
+          ? parsed.items.map((it: any) => ({
+              name: it.name || "Deliverable",
+              quantity: String(it.quantity || "1"),
               unit_amount: {
                 currency_code: parsed.currency || "USD",
-                value: "0.00",
+                value: normalizeAmountString(String(it.unitPrice || "0.00")),
               },
-            },
-          ],
+              sourceSpan: it.name ? findExactSpan(rawText, it.name) : null,
+            }))
+          : [
+              {
+                name: "Scope Work",
+                quantity: "1",
+                unit_amount: {
+                  currency_code: parsed.currency || "USD",
+                  value: "0.00",
+                },
+              },
+            ],
       note: {
         value: parsed.note ?? "Prepared via Freelance Invoice Copilot",
         sourceSpan: null,

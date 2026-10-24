@@ -20,14 +20,22 @@ describe("PayPalClient REST implementation against mock sandbox responses", () =
     vi.restoreAllMocks();
   });
 
-  it("blocks live PayPal base URL unless PAYPAL_ALLOW_LIVE=true", () => {
+  it("blocks live or non-sandbox PayPal base URLs unless PAYPAL_ALLOW_LIVE=true", () => {
     expect(() =>
       loadConfig({
         PAYPAL_CLIENT_ID: "id",
         PAYPAL_CLIENT_SECRET: "secret",
         PAYPAL_BASE_URL: "https://api-m.paypal.com",
       })
-    ).toThrow(/Refusing to use live PayPal/);
+    ).toThrow(/Refusing to use non-sandbox PayPal URL/);
+
+    expect(() =>
+      loadConfig({
+        PAYPAL_CLIENT_ID: "id",
+        PAYPAL_CLIENT_SECRET: "secret",
+        PAYPAL_BASE_URL: "https://api.paypal.com",
+      })
+    ).toThrow(/Refusing to use non-sandbox PayPal URL/);
 
     const allowed = loadConfig({
       PAYPAL_CLIENT_ID: "id",

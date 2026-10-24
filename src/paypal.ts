@@ -14,8 +14,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): PayPalConfig {
     throw new Error("PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set (sandbox credentials).");
   }
   const baseUrl = env.PAYPAL_BASE_URL ?? "https://api-m.sandbox.paypal.com";
-  if (baseUrl.includes("api-m.paypal.com") && env.PAYPAL_ALLOW_LIVE !== "true") {
-    throw new Error("Refusing to use live PayPal. Set PAYPAL_ALLOW_LIVE=true only after the demo is verified.");
+  let isSandboxHost = false;
+  try {
+    const parsed = new URL(baseUrl);
+    isSandboxHost =
+      parsed.protocol === "https:" &&
+      (parsed.hostname === "api-m.sandbox.paypal.com" || parsed.hostname.endsWith(".sandbox.paypal.com"));
+  } catch {
+    throw new Error(`Invalid PAYPAL_BASE_URL: ${baseUrl}`);
+  }
+  if (!isSandboxHost && env.PAYPAL_ALLOW_LIVE !== "true") {
+    throw new Error(
+      `Refusing to use non-sandbox PayPal URL (${baseUrl}). Set PAYPAL_ALLOW_LIVE=true only after the demo is verified.`
+    );
   }
   return { clientId, clientSecret, baseUrl };
 }

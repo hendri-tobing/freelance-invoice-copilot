@@ -1,10 +1,11 @@
 import { createServer, IncomingMessage, Server, ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { extname, join, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   createWorkflowServiceFromEnv,
   DraftUpdatePatch,
+  HttpError,
   InvoiceWorkflowService,
   SAMPLE_SCENARIOS,
 } from "./workflow.js";
@@ -36,14 +37,16 @@ async function readJsonBody<T>(req: IncomingMessage): Promise<T> {
   }
   const raw = Buffer.concat(chunks).toString("utf-8").trim();
   if (!raw) return {} as T;
-  return JSON.parse(raw) as T;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new HttpError(400, "Invalid JSON request body.");
+  }
 }
 
-function classifyErrorStatus(err: unknown): number {
-  const msg = err instanceof Error ? err.message : String(err);
-  if (/not found/i.test(msg)) return 404;
-  if (/Cannot send from stage|Cannot create draft from stage|not approved|must exist first/i.test(msg)) {
-    return 409;
+function getErrorStatus(err: unknown): number {
+  if (err instanceof HttpError) {
+    return err.statusCode;
   }
   return 400;
 }
@@ -54,7 +57,7 @@ export function createAppServer(
   return createServer(async (req, res) => {
     try {
       const method = req.method ?? "GET";
-      const url = new URL(req.url ?? "/", "http://localhost");
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
       const pathname = url.pathname;
 
       // 1. GET /api/config
@@ -110,11 +113,12 @@ export function createAppServer(
         }
       }
 
-      // 4. Static files in public/
+      // 4. Static files in public/ (strictly confined via path.relative)
       if (method === "GET") {
         const relPath = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
         const safePath = resolve(join(PUBLIC_DIR, relPath));
-        if (!safePath.startsWith(PUBLIC_DIR)) {
+        const relToPublic = relative(PUBLIC_DIR, safePath);
+        if (relToPublic.startsWith("..") || isAbsolute(relToPublic)) {
           return sendJson(res, 403, { error: "Forbidden" });
         }
         try {
@@ -133,7 +137,7 @@ export function createAppServer(
 
       return sendJson(res, 404, { error: `Route not found: ${method} ${pathname}` });
     } catch (err) {
-      const status = classifyErrorStatus(err);
+      const status = getErrorStatus(err);
       const message = err instanceof Error ? err.message : String(err);
       return sendJson(res, status, { error: message });
     }
@@ -146,14 +150,15 @@ const isMain =
 
 if (isMain) {
   const port = Number(process.env.PORT ?? 3000);
+  const host = process.env.HOST ?? "127.0.0.1";
   const workflow = createWorkflowServiceFromEnv();
   const server = createAppServer(workflow);
-  server.listen(port, () => {
+  server.listen(port, host, () => {
     const modes = workflow.getModes();
     console.log("==========================================================");
     console.log("  Freelance Invoice Copilot — Web UI & Guarded API Server ");
     console.log("==========================================================");
-    console.log(`  URL:             http://localhost:${port}`);
+    console.log(`  URL:             http://${host}:${port}`);
     console.log(`  Extraction Mode: ${modes.extractionMode.toUpperCase()}`);
     console.log(`  PayPal Mode:     ${modes.paypalMode.toUpperCase()}`);
     console.log("==========================================================");

@@ -68,7 +68,7 @@ describe("OpenAiExtractionProvider", () => {
     expect(draft.items[0].unit_amount.value).toBe("850.00");
   });
 
-  it("flags missing critical fields as ambiguous with clarification questions", async () => {
+  it("flags missing critical fields (including paymentTerm) as null and ambiguous without guessing", async () => {
     const rawText = "Finished the backend API refactoring, total is 600.";
 
     global.fetch = vi.fn().mockResolvedValueOnce({
@@ -102,6 +102,24 @@ describe("OpenAiExtractionProvider", () => {
     expect(draft.currency.value).toBeNull();
     expect(draft.currency.isAmbiguous).toBe(true);
     expect(draft.currency.clarificationQuestion).toBeTruthy();
+
+    expect(draft.paymentTerm.value).toBeNull();
+    expect(draft.paymentTerm.isAmbiguous).toBe(true);
+    expect(draft.paymentTerm.clarificationQuestion).toBeTruthy();
+  });
+
+  it("throws a descriptive error when LLM returns non-JSON content", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "Not valid JSON response" } }],
+      }),
+    });
+
+    const provider = new OpenAiExtractionProvider({ apiKey: "test-key" });
+    await expect(provider.extractInvoice("Hello")).rejects.toThrow(
+      /Failed to parse LLM extraction JSON/i
+    );
   });
 
   it("throws a clear error when the LLM endpoint returns non-OK HTTP status", async () => {

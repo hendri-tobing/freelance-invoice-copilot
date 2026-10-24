@@ -114,11 +114,23 @@ describe("HTTP API & Web UI Server (src/server.ts)", () => {
     expect(afterPay.paypalInvoice.status).toBe("PAID");
   });
 
-  it("serves the Single-Page Web UI at GET /", async () => {
+  it("serves the Single-Page Web UI at GET / and maps error codes by error type rather than message substring", async () => {
     const res = await fetch(`${baseUrl}/`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
     expect(html).toContain("Freelance Invoice Copilot");
+
+    // Non-existent session returns 404 via NotFoundError
+    const missingRes = await fetch(`${baseUrl}/api/sessions/non-existent-id`);
+    expect(missingRes.status).toBe(404);
+
+    // Invalid JSON or validation failure containing "not found" in payload still returns 400, not 404
+    const badPatchRes = await fetch(`${baseUrl}/api/sessions/extract`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rawText: "" }),
+    });
+    expect(badPatchRes.status).toBe(400);
   });
 });

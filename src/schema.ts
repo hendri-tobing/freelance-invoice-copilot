@@ -56,13 +56,16 @@ export function formatPayPalInvoiceV2Payload(draft: ExtractedInvoiceDraft, invoi
   if (!draft.currency.value) {
     throw new Error("Cannot build PayPal invoice payload without specified currency.");
   }
+  if (!draft.paymentTerm.value && !draft.dueDate.value) {
+    throw new Error("Cannot build PayPal invoice payload without a confirmed payment term or due date.");
+  }
 
   const payload: Record<string, unknown> = {
     detail: {
       currency_code: draft.currency.value,
       note: draft.note?.value ?? "Generated via Freelance Invoice Copilot",
       payment_term: {
-        term_type: draft.paymentTerm.value ?? "NET_14",
+        ...(draft.paymentTerm.value ? { term_type: draft.paymentTerm.value } : {}),
         ...(draft.dueDate.value ? { due_date: draft.dueDate.value } : {}),
       },
     },

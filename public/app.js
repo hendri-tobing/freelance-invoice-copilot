@@ -136,7 +136,7 @@ function renderSession(session) {
   el("input-email").value = d.recipientEmail.value || "";
   el("input-name").value = d.recipientName.value || "";
   el("input-currency").value = d.currency.value || "";
-  el("input-term").value = d.paymentTerm.value || "NET_14";
+  el("input-term").value = d.paymentTerm.value || "";
   el("input-duedate").value = d.dueDate.value || "";
   el("input-note").value = d.note?.value || "";
 
@@ -208,11 +208,16 @@ function renderSession(session) {
   const gate2Time = el("gate2-timestamp");
   const btnSend = el("btn-approve-send");
 
+  const hasTimingResolved =
+    (Boolean(d.paymentTerm.value) && !d.paymentTerm.isAmbiguous) ||
+    (Boolean(d.dueDate.value) && !d.dueDate.isAmbiguous);
+
   const hasRequiredResolved =
     Boolean(d.recipientEmail.value) &&
     !d.recipientEmail.isAmbiguous &&
     Boolean(d.currency.value) &&
     !d.currency.isAmbiguous &&
+    hasTimingResolved &&
     Number(firstItem.unit_amount.value) > 0;
 
   if (session.flow.stage === "proposed") {

@@ -24,6 +24,34 @@ export function findExactSpan(rawText: string, target: string): SourceSpan | nul
 }
 
 /**
+ * Normalizes extracted numeric strings, properly handling thousands separators
+ * (e.g. "1,200" -> "1200", "12,450.75" -> "12450.75", "450,50" -> "450.50").
+ */
+export function normalizeAmountString(raw: string): string {
+  const trimmed = raw.trim();
+  if (/^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(trimmed)) {
+    return trimmed.replace(/,/g, "");
+  }
+  if (/^\d+,\d{1,2}$/.test(trimmed)) {
+    return trimmed.replace(",", ".");
+  }
+  return trimmed.replace(/,/g, "");
+}
+
+const NAME_STOPWORDS = new Set([
+  "The",
+  "Our",
+  "My",
+  "Your",
+  "You",
+  "Send",
+  "Pay",
+  "Invoice",
+  "Please",
+  "Total",
+]);
+
+/**
  * Rule-based heuristic extractor used as an offline fallback,
  * baseline comparator, and test mock for judges when no live LLM key is supplied.
  */
@@ -53,36 +81,45 @@ export class DeterministicExtractor implements ExtractionProvider {
       currencyQuestion = "Which currency should be used for this invoice (e.g., USD, EUR, SGD)?";
     }
 
-    // 3. Amount / pricing extraction - prioritize currency-prefixed or explicit number
+    // 3. Amount / pricing extraction - support thousands commas (1,200 or 12,450.75)
+    const numPattern = "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?)";
     let amountVal = "0.00";
-    let amountMatch = rawText.match(/(?:\$|€|USD|EUR)\s*(\d+(?:[.,]\d{2})?)/i);
+    let amountMatch = rawText.match(new RegExp(`(?:\\$|€|USD|EUR)\\s*${numPattern}`, "i"));
     if (!amountMatch) {
-      amountMatch = rawText.match(/\b(\d+(?:[.,]\d{2})?)\s*(?:USD|EUR|\$|€)/i);
+      amountMatch = rawText.match(new RegExp(`\\b${numPattern}\\s*(?:USD|EUR|\\$|€)`, "i"));
     }
     if (!amountMatch) {
-      amountMatch = rawText.match(/\b(\d+(?:\.\d{2})?)\b/);
+      amountMatch = rawText.match(new RegExp(`\\b${numPattern}\\b`));
     }
     if (amountMatch) {
-      amountVal = amountMatch[1].replace(",", ".");
+      amountVal = normalizeAmountString(amountMatch[1]);
     }
 
-    // 4. Client name heuristic (e.g., "Hi Alex", "to Alex", "client: Alex")
-    const nameMatch = rawText.match(/(?:to|client|hi|hey)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
-    const nameVal = nameMatch ? nameMatch[1] : null;
+    // 4. Client name heuristic (strictly capitalized name tokens; never match lowercase words like "due to the delay")
+    const nameMatch = rawText.match(
+      /(?:^|\b)(?:[Hh]i|[Hh]ey|[Hh]ello|[Dd]ear|[Cc]lient:?|[Bb]ill\s+[Tt]o:?|[Tt]o)\s+([A-Z][a-z]{1,20}(?:\s+[A-Z][a-z]{1,20})?)\b/
+    );
+    const candidateName = nameMatch ? nameMatch[1] : null;
+    const firstWord = candidateName ? candidateName.split(/\s+/)[0] : "";
+    const nameVal = candidateName && !NAME_STOPWORDS.has(firstWord) ? candidateName : null;
     const nameSpan = nameVal ? findExactSpan(rawText, nameVal) : null;
 
-    // 5. Due date / payment term
-    let paymentTerm: "DUE_ON_RECEIPT" | "NET_10" | "NET_14" | "NET_15" | "NET_30" = "NET_14";
+    // 5. Due date / payment term (never silently invent NET_14 when missing)
+    let paymentTerm: ExtractedInvoiceDraft["paymentTerm"]["value"] = null;
     let termSpan: SourceSpan | null = null;
-    let dueDateVal: string | null = null;
-    let dueDateSpan: SourceSpan | null = null;
+    const dueDateVal: string | null = null;
+    const dueDateSpan: SourceSpan | null = null;
     let dateAmbiguous = false;
     let dateQuestion: string | null = null;
 
-    const termMatch = rawText.match(/net\s*(10|14|15|30)/i);
+    const termMatch = rawText.match(/net\s*(10|14|15|30|45|60)/i);
+    const receiptMatch = rawText.match(/due\s+on\s+receipt/i);
     if (termMatch) {
-      paymentTerm = `NET_${termMatch[1]}` as any;
+      paymentTerm = `NET_${termMatch[1]}` as ExtractedInvoiceDraft["paymentTerm"]["value"];
       termSpan = findExactSpan(rawText, termMatch[0]);
+    } else if (receiptMatch) {
+      paymentTerm = "DUE_ON_RECEIPT";
+      termSpan = findExactSpan(rawText, receiptMatch[0]);
     } else {
       dateAmbiguous = true;
       dateQuestion = "What is the payment term or due date for this invoice?";
@@ -110,8 +147,10 @@ export class DeterministicExtractor implements ExtractionProvider {
       paymentTerm: {
         value: paymentTerm,
         sourceSpan: termSpan,
-        isAmbiguous: !termSpan,
-        clarificationQuestion: termSpan ? null : "Specify payment term (e.g. NET_14, DUE_ON_RECEIPT)?",
+        isAmbiguous: !paymentTerm,
+        clarificationQuestion: paymentTerm
+          ? null
+          : "Specify payment term (e.g. NET_14, NET_30, DUE_ON_RECEIPT)?",
       },
       dueDate: {
         value: dueDateVal,

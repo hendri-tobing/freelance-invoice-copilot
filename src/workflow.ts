@@ -13,9 +13,23 @@ import {
   formatPayPalInvoiceV2Payload,
   InvoiceItem,
 } from "./schema.js";
-import { DeterministicExtractor, ExtractionProvider } from "./extractor.js";
+import {
+  DeterministicExtractor,
+  ExtractionProvider,
+  normalizeAmountString,
+} from "./extractor.js";
 import { OpenAiExtractionProvider } from "./aiExtractor.js";
 import { loadConfig, PayPalClient } from "./paypal.js";
+
+export class HttpError extends Error {
+  constructor(
+    public readonly statusCode: 400 | 404 | 409 | 502,
+    message: string
+  ) {
+    super(message);
+    this.name = "HttpError";
+  }
+}
 
 export type ExtractionMode = "live_ai" | "deterministic";
 export type PayPalMode = "live_sandbox" | "recorded_sandbox";
@@ -62,8 +76,19 @@ export class RecordedPayPalGateway implements PayPalGateway {
       updatedAt: string;
     }
   >();
+  private readonly requestIdMap = new Map<string, string>();
 
-  async createDraftInvoice(invoice: unknown, _requestId: string) {
+  async createDraftInvoice(invoice: unknown, requestId: string) {
+    const existingId = this.requestIdMap.get(requestId);
+    if (existingId && this.store.has(existingId)) {
+      const existing = this.store.get(existingId)!;
+      return {
+        id: existing.id,
+        status: existing.status,
+        simulation_notice: "RECORDED_SANDBOX_SIMULATION",
+      };
+    }
+
     const shortId = randomUUID().slice(0, 8).toUpperCase();
     const id = `INV2-SIM-${shortId}`;
     const now = new Date().toISOString();
@@ -74,6 +99,7 @@ export class RecordedPayPalGateway implements PayPalGateway {
       createdAt: now,
       updatedAt: now,
     });
+    this.requestIdMap.set(requestId, id);
     return {
       id,
       status: "DRAFT",
@@ -90,7 +116,7 @@ export class RecordedPayPalGateway implements PayPalGateway {
   async getInvoice(invoiceId: string) {
     const rec = this.store.get(invoiceId);
     if (!rec) {
-      throw new Error(`Recorded sandbox invoice not found: ${invoiceId}`);
+      throw new HttpError(404, `Recorded sandbox invoice not found: ${invoiceId}`);
     }
     return {
       id: rec.id,
@@ -119,7 +145,7 @@ export class RecordedPayPalGateway implements PayPalGateway {
   async sendInvoice(invoiceId: string) {
     const rec = this.store.get(invoiceId);
     if (!rec) {
-      throw new Error(`Recorded sandbox invoice not found: ${invoiceId}`);
+      throw new HttpError(404, `Recorded sandbox invoice not found: ${invoiceId}`);
     }
     rec.status = "SENT";
     rec.updatedAt = new Date().toISOString();
@@ -133,10 +159,13 @@ export class RecordedPayPalGateway implements PayPalGateway {
   async simulateBuyerPayment(invoiceId: string) {
     const rec = this.store.get(invoiceId);
     if (!rec) {
-      throw new Error(`Recorded sandbox invoice not found: ${invoiceId}`);
+      throw new HttpError(404, `Recorded sandbox invoice not found: ${invoiceId}`);
     }
     if (rec.status !== "SENT") {
-      throw new Error(`Cannot pay an invoice in status "${rec.status}". Must be SENT first.`);
+      throw new HttpError(
+        409,
+        `Cannot pay an invoice in status "${rec.status}". Must be SENT first.`
+      );
     }
     rec.status = "PAID";
     rec.updatedAt = new Date().toISOString();
@@ -154,6 +183,7 @@ export interface InvoiceSession {
   rawText: string;
   draft: ExtractedInvoiceDraft;
   flow: InvoiceFlow;
+  draftRequestId: string;
   unresolvedQuestions: UnresolvedQuestion[];
   formattedPayPalPayload: Record<string, unknown> | null;
   paypalInvoice: PayPalInvoiceRecord | null;
@@ -167,7 +197,16 @@ export interface DraftUpdatePatch {
   recipientEmail?: string;
   recipientName?: string;
   currency?: string;
-  paymentTerm?: "DUE_ON_RECEIPT" | "NET_10" | "NET_14" | "NET_15" | "NET_30" | "NET_45" | "NET_60";
+  paymentTerm?:
+    | "DUE_ON_RECEIPT"
+    | "NET_10"
+    | "NET_14"
+    | "NET_15"
+    | "NET_30"
+    | "NET_45"
+    | "NET_60"
+    | ""
+    | null;
   dueDate?: string | null;
   note?: string;
   items?: Array<{
@@ -213,8 +252,8 @@ I will prepare the invoice for alex@brightlabs.test.`,
     title: "Scenario 3: Complete Agreement (Ready for Gate 1)",
     badge: "All Fields Present",
     description:
-      "Contains client name, email, USD currency, $1200 amount, and Net 30 payment terms.",
-    rawText: `Hi Sarah, wrapping up the mobile checkout UI audit as agreed for $1200 USD.
+      "Contains client name, email, USD currency, $1,200 amount, and Net 30 payment terms.",
+    rawText: `Hi Sarah, wrapping up the mobile checkout UI audit as agreed for $1,200 USD.
 Sending the billing details to sarah@fintech-client.test under Net 30 terms.`,
   },
 ];
@@ -272,6 +311,7 @@ export function createWorkflowServiceFromEnv(
 
 export class InvoiceWorkflowService {
   private readonly sessions = new Map<string, InvoiceSession>();
+  private readonly inFlightLocks = new Set<string>();
 
   constructor(private readonly opts: WorkflowServiceOptions) {}
 
@@ -285,14 +325,14 @@ export class InvoiceWorkflowService {
   public getSession(sessionId: string): InvoiceSession {
     const session = this.sessions.get(sessionId);
     if (!session) {
-      throw new Error(`Session "${sessionId}" not found.`);
+      throw new HttpError(404, `Session "${sessionId}" not found.`);
     }
     return session;
   }
 
   public async createSessionFromText(rawText: string): Promise<InvoiceSession> {
     if (!rawText || !rawText.trim()) {
-      throw new Error("Please paste a client project message to extract.");
+      throw new HttpError(400, "Please paste a client project message to extract.");
     }
     const draft = await this.opts.extractor.extractInvoice(rawText);
     const id = randomUUID();
@@ -303,6 +343,7 @@ export class InvoiceWorkflowService {
       rawText,
       draft,
       flow: newFlow(),
+      draftRequestId: randomUUID(),
       unresolvedQuestions: this.computeQuestions(draft),
       formattedPayPalPayload: this.tryBuildPayload(draft),
       paypalInvoice: null,
@@ -318,8 +359,12 @@ export class InvoiceWorkflowService {
 
   public updateDraft(sessionId: string, patch: DraftUpdatePatch): InvoiceSession {
     const session = this.getSession(sessionId);
+    if (this.inFlightLocks.has(sessionId)) {
+      throw new HttpError(409, "An approval action is currently in progress for this session.");
+    }
     if (session.flow.stage !== "proposed") {
-      throw new Error(
+      throw new HttpError(
+        409,
         `Cannot edit extracted draft in stage "${session.flow.stage}". Create a new session to modify.`
       );
     }
@@ -366,14 +411,17 @@ export class InvoiceWorkflowService {
     }
 
     if (patch.paymentTerm !== undefined) {
+      const termVal = patch.paymentTerm ? patch.paymentTerm : null;
       nextDraft.paymentTerm = {
-        value: patch.paymentTerm,
+        value: termVal,
         sourceSpan: nextDraft.paymentTerm.sourceSpan,
-        isAmbiguous: false,
-        clarificationQuestion: null,
+        isAmbiguous: !termVal && !nextDraft.dueDate.value,
+        clarificationQuestion:
+          !termVal && !nextDraft.dueDate.value
+            ? "Specify payment term (e.g. NET_14, NET_30, DUE_ON_RECEIPT)?"
+            : null,
       };
-      // Selecting an explicit payment term also resolves due-date ambiguity if no fixed date is needed
-      if (patch.dueDate === undefined && !nextDraft.dueDate.value) {
+      if (termVal && patch.dueDate === undefined && !nextDraft.dueDate.value) {
         nextDraft.dueDate = {
           ...nextDraft.dueDate,
           isAmbiguous: false,
@@ -384,12 +432,21 @@ export class InvoiceWorkflowService {
 
     if (patch.dueDate !== undefined) {
       const due = patch.dueDate ? patch.dueDate.trim() : null;
+      const hasTerm = Boolean(nextDraft.paymentTerm.value);
       nextDraft.dueDate = {
         value: due || null,
         sourceSpan: nextDraft.dueDate.sourceSpan,
-        isAmbiguous: false,
-        clarificationQuestion: null,
+        isAmbiguous: !due && !hasTerm,
+        clarificationQuestion:
+          !due && !hasTerm ? "What is the payment term or due date for this invoice?" : null,
       };
+      if (due && !nextDraft.paymentTerm.value) {
+        nextDraft.paymentTerm = {
+          ...nextDraft.paymentTerm,
+          isAmbiguous: false,
+          clarificationQuestion: null,
+        };
+      }
     }
 
     if (patch.note !== undefined) {
@@ -409,7 +466,7 @@ export class InvoiceWorkflowService {
         quantity: String(item.quantity).trim() || "1",
         unit_amount: {
           currency_code: currCode,
-          value: String(item.unitPrice).trim() || "0.00",
+          value: normalizeAmountString(String(item.unitPrice || "0.00")),
         },
         sourceSpan: session.draft.items[idx]?.sourceSpan ?? null,
       }));
@@ -417,6 +474,8 @@ export class InvoiceWorkflowService {
 
     const validated = ExtractedInvoiceDraftSchema.parse(nextDraft);
     session.draft = validated;
+    // Generate a fresh idempotency key when the draft payload changes
+    session.draftRequestId = randomUUID();
     session.unresolvedQuestions = this.computeQuestions(validated);
     session.formattedPayPalPayload = this.tryBuildPayload(validated);
     session.updatedAt = new Date().toISOString();
@@ -425,71 +484,85 @@ export class InvoiceWorkflowService {
 
   /**
    * Gate 1: User explicitly approves creating a PayPal DRAFT invoice.
-   * Does NOT send the invoice to the client.
+   * Protected by per-session in-flight lock and deterministic PayPal-Request-Id for retry deduplication.
    */
   public async approveAndCreateDraft(sessionId: string): Promise<InvoiceSession> {
     const session = this.getSession(sessionId);
+    return this.withSessionLock(sessionId, async () => {
+      let approvedFlow: InvoiceFlow;
+      try {
+        approvedFlow = approveDraft(session.flow);
+      } catch (err) {
+        throw new HttpError(409, err instanceof Error ? err.message : String(err));
+      }
 
-    const missingReasons: string[] = [];
-    if (!session.draft.recipientEmail.value || session.draft.recipientEmail.isAmbiguous) {
-      missingReasons.push("recipientEmail");
-    }
-    if (!session.draft.currency.value || session.draft.currency.isAmbiguous) {
-      missingReasons.push("currency");
-    }
-    if (
-      !session.draft.items.length ||
-      session.draft.items.some((it) => Number(it.unit_amount.value) <= 0)
-    ) {
-      missingReasons.push("positive line item amount");
-    }
+      const missingReasons: string[] = [];
+      if (!session.draft.recipientEmail.value || session.draft.recipientEmail.isAmbiguous) {
+        missingReasons.push("recipientEmail");
+      }
+      if (!session.draft.currency.value || session.draft.currency.isAmbiguous) {
+        missingReasons.push("currency");
+      }
+      const hasResolvedTiming =
+        (Boolean(session.draft.paymentTerm.value) && !session.draft.paymentTerm.isAmbiguous) ||
+        (Boolean(session.draft.dueDate.value) && !session.draft.dueDate.isAmbiguous);
+      if (!hasResolvedTiming) {
+        missingReasons.push("paymentTerm or dueDate");
+      }
+      if (
+        !session.draft.items.length ||
+        session.draft.items.some((it) => Number(it.unit_amount.value) <= 0)
+      ) {
+        missingReasons.push("positive line item amount");
+      }
 
-    if (missingReasons.length > 0) {
-      throw new Error(
-        `Cannot approve draft yet: please resolve missing or ambiguous required fields (${missingReasons.join(", ")}).`
-      );
-    }
+      if (missingReasons.length > 0) {
+        throw new HttpError(
+          400,
+          `Cannot approve draft yet: please resolve missing or ambiguous required fields (${missingReasons.join(", ")}).`
+        );
+      }
 
-    const payload = formatPayPalInvoiceV2Payload(session.draft, this.opts.invoicerEmail);
+      const payload = formatPayPalInvoiceV2Payload(session.draft, this.opts.invoicerEmail);
 
-    // Step 1a: Transition approval state machine (throws if not in 'proposed' stage)
-    const approvedFlow = approveDraft(session.flow);
+      // Persist approval timestamp before network call; reuse session.draftRequestId across retries
+      session.flow = approvedFlow;
+      const created = await this.opts.paypal.createDraftInvoice(payload, session.draftRequestId);
+      const fetched = await this.opts.paypal.getInvoice(created.id);
 
-    // Step 1b: Call PayPal gateway to create DRAFT
-    const created = await this.opts.paypal.createDraftInvoice(payload, randomUUID());
-    const fetched = await this.opts.paypal
-      .getInvoice(created.id)
-      .catch(() => ({ id: created.id, status: created.status ?? "DRAFT" }));
-
-    // Step 1c: Record draft creation in state machine
-    session.flow = recordDraftCreated(approvedFlow, created.id);
-    session.formattedPayPalPayload = payload;
-    session.paypalInvoice = this.normalizePayPalRecord(fetched);
-    session.updatedAt = new Date().toISOString();
-    return session;
+      session.flow = recordDraftCreated(approvedFlow, created.id);
+      session.formattedPayPalPayload = payload;
+      session.paypalInvoice = this.normalizePayPalRecord(fetched);
+      session.updatedAt = new Date().toISOString();
+      return session;
+    });
   }
 
   /**
    * Gate 2: User separately approves SENDING the already-created draft to the client.
+   * Protected by per-session in-flight lock.
    */
   public async approveAndSendInvoice(sessionId: string): Promise<InvoiceSession> {
     const session = this.getSession(sessionId);
+    return this.withSessionLock(sessionId, async () => {
+      let approvedSendFlow: InvoiceFlow;
+      try {
+        approvedSendFlow = approveSend(session.flow);
+      } catch (err) {
+        throw new HttpError(409, err instanceof Error ? err.message : String(err));
+      }
 
-    // Step 2a: Transition approval state machine (throws if draft does not exist yet)
-    const approvedSendFlow = approveSend(session.flow);
-    const invoiceId = session.flow.paypalInvoiceId!;
+      const invoiceId = session.flow.paypalInvoiceId!;
+      session.flow = approvedSendFlow;
 
-    // Step 2b: Call PayPal gateway to send invoice
-    const sendResult = await this.opts.paypal.sendInvoice(invoiceId);
-    const fetched = await this.opts.paypal
-      .getInvoice(invoiceId)
-      .catch(() => ({ id: invoiceId, status: "SENT" }));
+      const sendResult = await this.opts.paypal.sendInvoice(invoiceId);
+      const fetched = await this.opts.paypal.getInvoice(invoiceId);
 
-    // Step 2c: Record sent in state machine
-    session.flow = recordSent(approvedSendFlow);
-    session.paypalInvoice = this.normalizePayPalRecord(fetched, sendResult);
-    session.updatedAt = new Date().toISOString();
-    return session;
+      session.flow = recordSent(approvedSendFlow);
+      session.paypalInvoice = this.normalizePayPalRecord(fetched, sendResult);
+      session.updatedAt = new Date().toISOString();
+      return session;
+    });
   }
 
   /**
@@ -499,7 +572,7 @@ export class InvoiceWorkflowService {
     const session = this.getSession(sessionId);
     const invoiceId = session.flow.paypalInvoiceId;
     if (!invoiceId) {
-      throw new Error("No PayPal invoice has been created for this session yet.");
+      throw new HttpError(400, "No PayPal invoice has been created for this session yet.");
     }
     const fetched = await this.opts.paypal.getInvoice(invoiceId);
     session.paypalInvoice = this.normalizePayPalRecord(fetched);
@@ -514,16 +587,32 @@ export class InvoiceWorkflowService {
   public async simulateSandboxPayment(sessionId: string): Promise<InvoiceSession> {
     const session = this.getSession(sessionId);
     if (this.opts.paypalMode !== "recorded_sandbox" || !this.opts.paypal.simulateBuyerPayment) {
-      throw new Error(
+      throw new HttpError(
+        400,
         "Simulated payment is only available in Recorded Sandbox Mode. In Live Sandbox mode, pay the hosted invoice URL with your PayPal sandbox buyer account and click Refresh Status."
       );
     }
     const invoiceId = session.flow.paypalInvoiceId;
     if (!invoiceId || session.flow.stage !== "sent") {
-      throw new Error("Invoice must be created and sent before simulating buyer payment.");
+      throw new HttpError(409, "Invoice must be created and sent before simulating buyer payment.");
     }
     await this.opts.paypal.simulateBuyerPayment(invoiceId);
     return this.refreshInvoiceStatus(sessionId);
+  }
+
+  private async withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+    if (this.inFlightLocks.has(sessionId)) {
+      throw new HttpError(
+        409,
+        `Another operation is already in progress for session "${sessionId}".`
+      );
+    }
+    this.inFlightLocks.add(sessionId);
+    try {
+      return await fn();
+    } finally {
+      this.inFlightLocks.delete(sessionId);
+    }
   }
 
   private computeQuestions(draft: ExtractedInvoiceDraft): UnresolvedQuestion[] {
@@ -546,10 +635,14 @@ export class InvoiceWorkflowService {
       list.push({
         field: "paymentTerm",
         question: draft.paymentTerm.clarificationQuestion,
-        required: false,
+        required: true,
       });
     }
-    if (draft.dueDate.isAmbiguous && draft.dueDate.clarificationQuestion) {
+    if (
+      draft.dueDate.isAmbiguous &&
+      draft.dueDate.clarificationQuestion &&
+      !draft.paymentTerm.isAmbiguous
+    ) {
       list.push({
         field: "dueDate",
         question: draft.dueDate.clarificationQuestion,
