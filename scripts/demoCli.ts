@@ -2,11 +2,11 @@ import * as readline from "node:readline";
 import { DeterministicExtractor } from "../src/extractor.js";
 import { InvoiceWorkflowService, RecordedPayPalGateway } from "../src/workflow.js";
 
-const sampleChat = `Hi Jordan,
-Wrapping up the deliverables for the BrightWave web relaunch:
+const sampleChat = `Client: Jordan Patel <jordan@brightwave.test>
+Approved deliverables for BrightWave web relaunch:
 1. Discovery & UX Audit: $400 USD
 2. Responsive Webflow Implementation: $850 USD
-Please send the invoice to jordan@brightwave.test under Net 14. Thanks!`;
+Payment terms: Net 14. Send over the invoice when ready!`;
 
 function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
