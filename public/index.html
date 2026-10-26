@@ -332,6 +332,88 @@
         </div>
       </div>
 
+      <!-- Gate 3: Follow-up & Reminder Copilot Card (Shown once Invoice is Sent) -->
+      <div id="gate3-card" class="gate-card hidden">
+        <div class="gate-card-header">
+          <strong>Follow-up &amp; Reminder Copilot (Gate 3)</strong>
+          <span id="gate3-status" class="gate-badge">Ready</span>
+        </div>
+        <p class="gate-desc">
+          Drafts a contextual follow-up note from your invoice details and sends an official PayPal reminder (<code>POST /v2/invoicing/invoices/{id}/remind</code>) only when you approve.
+        </p>
+
+        <div id="gate3-controls">
+          <div class="tone-tabs" role="tablist" aria-label="Reminder tone">
+            <button type="button" class="tone-tab active" data-tone="gentle" role="tab" aria-selected="true">
+              Gentle
+            </button>
+            <button type="button" class="tone-tab" data-tone="professional" role="tab" aria-selected="false">
+              Professional
+            </button>
+            <button type="button" class="tone-tab" data-tone="urgent" role="tab" aria-selected="false">
+              Urgent
+            </button>
+          </div>
+
+          <div class="form-group">
+            <div class="field-label-row">
+              <label for="input-reminder-subject">Reminder Subject <span class="req" aria-hidden="true">*</span></label>
+            </div>
+            <input type="text" id="input-reminder-subject" placeholder="Payment reminder subject" />
+          </div>
+
+          <div class="form-group">
+            <div class="field-label-row">
+              <label for="input-reminder-note">Reminder Note to Client <span class="req" aria-hidden="true">*</span></label>
+            </div>
+            <textarea id="input-reminder-note" rows="3" placeholder="Polite follow-up note..."></textarea>
+          </div>
+
+          <button type="button" id="btn-approve-reminder" class="btn btn-gate3 btn-block">
+            Approve &amp; Send Reminder via PayPal
+          </button>
+        </div>
+
+        <p id="gate3-reason" class="gate-reason">
+          Rate-limited to a maximum of 2 reminders per day to prevent accidental client spam.
+        </p>
+
+        <div id="reminder-history-section" class="reminder-history hidden">
+          <div class="reminder-history-title">Sent Reminders Log</div>
+          <ul id="reminder-history-list" class="reminder-history-list"></ul>
+        </div>
+      </div>
+
+      <!-- Native modal dialog for Gate 3 reminder confirmation -->
+      <dialog id="gate3-confirm-dialog" class="gate-confirm-dialog" aria-labelledby="gate3-dialog-title">
+        <div class="gate-confirm-content">
+          <div id="gate3-dialog-title" class="gate-confirm-title">Confirm Sending Payment Reminder</div>
+          <p class="gate-confirm-note">This action emails a PayPal payment reminder to your client:</p>
+          <dl class="gate-confirm-summary">
+            <div>
+              <dt>Recipient:</dt>
+              <dd id="confirm-remind-recipient">—</dd>
+            </div>
+            <div>
+              <dt>Tone:</dt>
+              <dd id="confirm-remind-tone">—</dd>
+            </div>
+            <div>
+              <dt>Subject:</dt>
+              <dd id="confirm-remind-subject">—</dd>
+            </div>
+          </dl>
+          <div class="gate-confirm-actions">
+            <button type="button" id="btn-confirm-reminder" class="btn btn-gate3">
+              Confirm &amp; Send Reminder Now
+            </button>
+            <button type="button" id="btn-cancel-reminder" class="btn btn-small">
+              Cancel
+            </button>
+          </div>
+        </div>
+      </dialog>
+
       <!-- Technical Details Inspector -->
       <details class="payload-inspector">
         <summary>

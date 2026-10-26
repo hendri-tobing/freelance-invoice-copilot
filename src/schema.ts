@@ -47,6 +47,28 @@ export const ExtractedInvoiceDraftSchema = z.object({
 
 export type ExtractedInvoiceDraft = z.infer<typeof ExtractedInvoiceDraftSchema>;
 
+export const ReminderToneSchema = z.enum(["gentle", "professional", "urgent"]);
+export type ReminderTone = z.infer<typeof ReminderToneSchema>;
+
+export const ReminderNotificationSchema = z.object({
+  subject: z.string().min(1, "Reminder subject cannot be empty"),
+  note: z.string().min(1, "Reminder note cannot be empty"),
+  send_to_invoicer: z.boolean().default(true),
+  send_to_recipient: z.boolean().default(true),
+  additional_recipients: z.array(z.string().email()).default([]),
+});
+
+export type ReminderNotification = z.infer<typeof ReminderNotificationSchema>;
+
+export const ReminderRecordSchema = z.object({
+  sentAt: z.string(),
+  subject: z.string().min(1),
+  note: z.string().min(1),
+  tone: ReminderToneSchema,
+});
+
+export type ReminderRecord = z.infer<typeof ReminderRecordSchema>;
+
 /**
  * Transforms an ExtractedInvoiceDraft into the exact payload required by
  * PayPal Invoicing v2: POST /v2/invoicing/invoices

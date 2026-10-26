@@ -15,6 +15,7 @@ export interface UiStateSnapshot {
   editableItems: EditableLineItem[];
   isFormDirty: boolean;
   activeHighlightField: string | null;
+  activeReminderTone?: "gentle" | "professional" | "urgent";
 }
 
 export function getUiState(): UiStateSnapshot;
@@ -28,5 +29,7 @@ export function setActiveHighlightField(fieldKey: string | null): void;
 export function renderProvenanceDomOnce(): void;
 export function openGate2ConfirmDialog(): boolean;
 export function closeGate2ConfirmDialog(): void;
+export function openGate3ConfirmDialog(): boolean;
+export function closeGate3ConfirmDialog(): void;
 export function renderSession(session: InvoiceSession): void;
 export function init(): Promise<void>;

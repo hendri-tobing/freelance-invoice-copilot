@@ -1,6 +1,8 @@
 // Thin REST client for PayPal Invoicing v2 (sandbox by default).
 // Auth: OAuth 2.0 client credentials. Credentials come from environment variables only.
 
+import type { ReminderNotification } from "./schema.js";
+
 export interface PayPalConfig {
   clientId: string;
   clientSecret: string;
@@ -87,5 +89,14 @@ export class PayPalClient {
   /** POST /v2/invoicing/invoices/{id}/send — makes the invoice payable and emails the payer. */
   sendInvoice(invoiceId: string, sendBody: unknown = { send_to_recipient: true }) {
     return this.request<unknown>("POST", `/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}/send`, sendBody);
+  }
+
+  /** POST /v2/invoicing/invoices/{id}/remind — sends an email reminder for a SENT invoice (HTTP 204/200). */
+  async sendInvoiceReminder(invoiceId: string, notification: ReminderNotification): Promise<void> {
+    await this.request<unknown>(
+      "POST",
+      `/v2/invoicing/invoices/${encodeURIComponent(invoiceId)}/remind`,
+      notification
+    );
   }
 }

@@ -11,10 +11,11 @@ Freelancers often agree on project scope and pricing in informal client messages
 1. **Provenance Spans & Zero Guessing (`src/extractor.ts`, `src/aiExtractor.ts`, `src/schema.ts`):**
    - Every extracted field (`recipientEmail`, `recipientName`, `currency`, `paymentTerm`, `dueDate`, and multi-deliverable `items`) is mapped to its exact character offset (`sourceSpan: { start, end, text }`) in the original pasted message.
    - Missing or ambiguous fields (including unpriced or recurring list items such as `"$20/month"` or `"included"`) are **never guessed or silently dropped**; they are surfaced as explicit clarification items that must be resolved before draft creation.
-2. **Enforced Two-Step Approval Gate (`src/approval.ts`, `src/workflow.ts`):**
+2. **Enforced Three-Gate Approval Workflow (`src/approval.ts`, `src/workflow.ts`, `src/reminderDrafter.ts`):**
    - **Gate 1 (Create Draft):** Auto-saves any pending form edits, validates all required fields and line items, and calls `POST /v2/invoicing/invoices` with a deterministic `PayPal-Request-Id` idempotency key to create an editable PayPal draft (`DRAFT`). It never emails the client.
    - **Gate 2 (Send Invoice):** Requires an existing draft and a second, separate human confirmation dialog before calling `POST /v2/invoicing/invoices/{id}/send`.
-   - `InvoiceWorkflowService` enforces both gates on the backend with per-session concurrency locks—neither the UI nor API callers can skip Gate 1, double-submit, or trigger Gate 2 with unresolved required fields.
+   - **Gate 3 (Follow-up & Reminder Copilot):** Once an invoice is `SENT` (and not yet `PAID`), the AI Reminder Copilot drafts contextual follow-up messages in three tones (`Gentle`, `Professional`, `Urgent`) and requires explicit Gate 3 confirmation before calling `POST /v2/invoicing/invoices/{id}/remind` (rate-limited to max 2/day per invoice).
+   - `InvoiceWorkflowService` enforces all three gates on the backend with per-session concurrency locks—neither the UI nor API callers can skip gates, double-submit, or spam reminders.
 3. **PayPal System-of-Record Status (`src/paypal.ts`):**
    - Displays PayPal's invoice status (`DRAFT`, `SENT`, `PAID`) and hosted invoice links verbatim from the API response without inventing custom payment states.
 
@@ -28,7 +29,7 @@ Freelancers often agree on project scope and pricing in informal client messages
 ### 1. Install & Run Tests
 ```bash
 npm install
-npm test          # Runs 37 unit, UI & HTTP integration tests across 7 suites
+npm test          # Runs 44 unit, UI & HTTP integration tests across 8 suites
 npm run typecheck # Zero-error TypeScript check
 ```
 
@@ -71,7 +72,7 @@ When credentials are provided, the header badges in the Web UI automatically swi
 | --- | --- |
 | `npm start` | Starts the Web UI and guarded HTTP API server on `http://127.0.0.1:3000` |
 | `npm run dev` | Starts the server in watch mode |
-| `npm test` | Runs all 7 Vitest unit, UI & integration test suites (`approval`, `extractor`, `aiExtractor`, `paypal`, `workflow`, `server`, `ui`) |
+| `npm test` | Runs all 8 Vitest unit, UI & integration test suites (`approval`, `extractor`, `aiExtractor`, `reminderDrafter`, `paypal`, `workflow`, `server`, `ui`) |
 | `npm run typecheck` | Runs `tsc -p .` static type checking |
 | `npm run demo` | Interactive terminal CLI walkthrough of extraction + two-step approval |
 | `npm run spike` | Live PayPal Sandbox round-trip script: create draft &rarr; fetch &rarr; send (requires sandbox credentials) |
@@ -83,13 +84,14 @@ When credentials are provided, the header badges in the Web UI automatically swi
 
 ```text
 src/
-  schema.ts        Zod schemas, SourceSpan provenance types, and PayPal v2 payload formatter
-  extractor.ts     DeterministicExtractor (offline fallback) and exact substring span finder
-  aiExtractor.ts   OpenAiExtractionProvider (LLM JSON extraction + verbatim span verification)
-  approval.ts      Pure two-step approval state machine (proposed -> draft_created -> sent)
-  paypal.ts        PayPal Invoicing v2 REST client (OAuth 2.0 + sandbox-by-default guardrail)
-  workflow.ts      Guarded InvoiceWorkflowService orchestrator + RecordedPayPalGateway
-  server.ts        Zero-dependency Node.js HTTP server for REST API + Web UI (bound to 127.0.0.1)
+  schema.ts          Zod schemas, SourceSpan provenance types, and PayPal v2 payload formatter
+  extractor.ts       DeterministicExtractor (offline fallback) and exact substring span finder
+  aiExtractor.ts     OpenAiExtractionProvider (LLM JSON extraction + verbatim span verification)
+  reminderDrafter.ts AI & deterministic reminder drafter (Gentle, Professional, Urgent tones)
+  approval.ts        Pure approval state machine (Gate 1 Draft, Gate 2 Send, Gate 3 Reminder)
+  paypal.ts          PayPal Invoicing v2 REST client (OAuth 2.0 + sandbox-by-default guardrail)
+  workflow.ts        Guarded InvoiceWorkflowService orchestrator + RecordedPayPalGateway
+  server.ts          Zero-dependency Node.js HTTP server for REST API + Web UI (bound to 127.0.0.1)
 public/
   index.html       3-step Single-Page Web UI (Source Provenance, Review Form, Approval Gates)
   styles.css       Responsive UI styling with CSS container queries & WCAG AA contrast

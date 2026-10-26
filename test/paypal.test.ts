@@ -133,4 +133,55 @@ describe("PayPalClient REST implementation against mock sandbox responses", () =
       })
     );
   });
+
+  it("sends an invoice reminder via POST /v2/invoicing/invoices/{id}/remind (HTTP 204) and surfaces API errors", async () => {
+    const mockFetch = vi.fn();
+    global.fetch = mockFetch;
+
+    // 1. OAuth
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        access_token: "mock_token_remind",
+        expires_in: 3600,
+      }),
+    });
+
+    // 2. HTTP 204 No Content response from /remind
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 204,
+      text: async () => "",
+    });
+
+    const notification = {
+      subject: "Gentle reminder: Invoice INV2-DRAFT-9999",
+      note: "Hi Jordan, quick check-in on the invoice.",
+      send_to_invoicer: true,
+      send_to_recipient: true,
+      additional_recipients: [],
+    };
+
+    await client.sendInvoiceReminder("INV2-DRAFT-9999", notification);
+
+    expect(mockFetch).toHaveBeenNthCalledWith(
+      2,
+      "https://api-m.sandbox.paypal.com/v2/invoicing/invoices/INV2-DRAFT-9999/remind",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(notification),
+      })
+    );
+
+    // 3. HTTP 422 error when invoice is already paid or rate-limited
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      text: async () => JSON.stringify({ name: "UNPROCESSABLE_ENTITY", message: "Max reminders exceeded" }),
+    });
+
+    await expect(client.sendInvoiceReminder("INV2-DRAFT-9999", notification)).rejects.toThrow(
+      /HTTP 422.*Max reminders exceeded/
+    );
+  });
 });

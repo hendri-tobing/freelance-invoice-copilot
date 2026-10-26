@@ -958,6 +958,87 @@ select:disabled {
   max-height: 200px;
 }
 
+.tone-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.tone-tab {
+  flex: 1;
+  min-width: 84px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.tone-tab:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.tone-tab.active {
+  background: var(--paypal-blue);
+  color: #fff;
+  border-color: var(--paypal-blue);
+}
+
+.btn-gate3 {
+  background: #0369a1;
+  color: #fff;
+  border: none;
+  margin-top: 8px;
+}
+
+.btn-gate3:hover:not(:disabled) {
+  background: #075985;
+}
+
+#gate3-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reminder-history {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.reminder-history-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.reminder-history-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reminder-history-list li {
+  font-size: 11.5px;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .hidden {
   display: none !important;
 }

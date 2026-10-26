@@ -292,4 +292,93 @@ Send to alex@brightlabs.test Net 14.`);
     });
     await expect(service.approveAndCreateDraft(session.id)).rejects.toThrow(/quantity/i);
   });
+
+  it("supports Gate 3 reminder drafting and guarded reminder sending with rate limiting and PAID protection", async () => {
+    const service = new InvoiceWorkflowService({
+      extractor: new DeterministicExtractor(),
+      paypal: new RecordedPayPalGateway(),
+      extractionMode: "deterministic",
+      paypalMode: "recorded_sandbox",
+    });
+
+    const session = await service.createSessionFromText(
+      "Hi Sarah, wrapping up the mobile checkout UI audit as agreed for $1,200 USD. Sending to sarah@fintech-client.test under Net 30 terms."
+    );
+
+    // Cannot draft or send reminder while still in 'proposed' stage
+    await expect(service.draftReminder(session.id, "gentle")).rejects.toThrow(/sent/i);
+    await expect(
+      service.approveAndSendReminder(session.id, {
+        subject: "Reminder",
+        note: "Please pay",
+        tone: "gentle",
+      })
+    ).rejects.toThrow(/sent/i);
+
+    await service.approveAndCreateDraft(session.id);
+
+    // Still cannot send reminder in 'draft_created' stage
+    await expect(
+      service.approveAndSendReminder(session.id, {
+        subject: "Reminder",
+        note: "Please pay",
+        tone: "gentle",
+      })
+    ).rejects.toThrow(/sent/i);
+
+    await service.approveAndSendInvoice(session.id);
+
+    // Draft reminders in 3 tones
+    const gentleDraft = await service.draftReminder(session.id, "gentle");
+    expect(gentleDraft.tone).toBe("gentle");
+    expect(gentleDraft.subject).toContain("USD 1200.00");
+    expect(gentleDraft.note).toContain("Sarah");
+
+    const urgentDraft = await service.draftReminder(session.id, "urgent");
+    expect(urgentDraft.tone).toBe("urgent");
+    expect(urgentDraft.subject).toMatch(/overdue|action required/i);
+
+    // Send 1st reminder via Gate 3
+    const afterRemind1 = await service.approveAndSendReminder(session.id, {
+      subject: gentleDraft.subject,
+      note: gentleDraft.note,
+      tone: "gentle",
+    });
+    expect(afterRemind1.reminders).toHaveLength(1);
+    expect(afterRemind1.reminders[0].tone).toBe("gentle");
+    expect(afterRemind1.reminders[0].subject).toBe(gentleDraft.subject);
+
+    // Send 2nd reminder on the same UTC day -> allowed
+    const afterRemind2 = await service.approveAndSendReminder(session.id, {
+      subject: urgentDraft.subject,
+      note: urgentDraft.note,
+      tone: "urgent",
+    });
+    expect(afterRemind2.reminders).toHaveLength(2);
+
+    // 3rd reminder on the same UTC day -> blocked by anti-spam rate limit (max 2/day)
+    await expect(
+      service.approveAndSendReminder(session.id, {
+        subject: "Third reminder today",
+        note: "Spam check",
+        tone: "urgent",
+      })
+    ).rejects.toThrow(/maximum of 2 reminders per day/i);
+
+    // Once invoice is PAID, reminders are blocked even if daily limit wasn't reached
+    const session2 = await service.createSessionFromText(
+      "Hi Sarah, wrapping up the mobile checkout UI audit as agreed for $1,200 USD. Sending to sarah@fintech-client.test under Net 30 terms."
+    );
+    await service.approveAndCreateDraft(session2.id);
+    await service.approveAndSendInvoice(session2.id);
+    await service.simulateSandboxPayment(session2.id);
+
+    await expect(
+      service.approveAndSendReminder(session2.id, {
+        subject: "Post-payment reminder",
+        note: "Should not send",
+        tone: "gentle",
+      })
+    ).rejects.toThrow(/PAID/i);
+  });
 });

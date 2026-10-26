@@ -103,6 +103,38 @@ describe("HTTP API & Web UI Server (src/server.ts)", () => {
     const afterSend = await sendRes.json();
     expect(afterSend.flow.stage).toBe("sent");
     expect(afterSend.paypalInvoice.status).toBe("SENT");
+    expect(afterSend.lastDraftedReminder).toBeTruthy();
+
+    // 6b. Gate 3: Draft Reminder & Approve + Send Reminder via REST endpoints
+    const draftRemindRes = await fetch(
+      `${baseUrl}/api/sessions/${session.id}/remind/draft`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tone: "professional" }),
+      }
+    );
+    expect(draftRemindRes.status).toBe(200);
+    const draftedRemind = await draftRemindRes.json();
+    expect(draftedRemind.tone).toBe("professional");
+    expect(draftedRemind.subject).toContain("USD 450.00");
+
+    const sendRemindRes = await fetch(
+      `${baseUrl}/api/sessions/${session.id}/remind/approve-send`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: draftedRemind.subject,
+          note: draftedRemind.note,
+          tone: "professional",
+        }),
+      }
+    );
+    expect(sendRemindRes.status).toBe(200);
+    const afterRemind = await sendRemindRes.json();
+    expect(afterRemind.reminders).toHaveLength(1);
+    expect(afterRemind.reminders[0].tone).toBe("professional");
 
     // 7. Simulate Sandbox Payment
     const payRes = await fetch(
@@ -112,6 +144,21 @@ describe("HTTP API & Web UI Server (src/server.ts)", () => {
     expect(payRes.status).toBe(200);
     const afterPay = await payRes.json();
     expect(afterPay.paypalInvoice.status).toBe("PAID");
+
+    // 8. Attempting Gate 3 reminder after PAID must return 409
+    const postPayRemind = await fetch(
+      `${baseUrl}/api/sessions/${session.id}/remind/approve-send`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: draftedRemind.subject,
+          note: draftedRemind.note,
+          tone: "professional",
+        }),
+      }
+    );
+    expect(postPayRemind.status).toBe(409);
   });
 
   it("preserves provenance on remaining line item when item 1 is removed via PATCH /api/sessions/:id/draft and rejects invalid quantity", async () => {

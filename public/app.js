@@ -2,6 +2,7 @@ let currentSession = null;
 let activeHighlightField = null;
 let isFormDirty = false;
 let editableItems = [];
+let activeReminderTone = "gentle";
 
 const el = (id) => (typeof document !== "undefined" ? document.getElementById(id) : null);
 
@@ -42,6 +43,7 @@ export function getUiState() {
     activeHighlightField,
     isFormDirty,
     editableItems,
+    activeReminderTone,
   };
 }
 
@@ -50,6 +52,7 @@ export function setUiStateForTest(partial) {
   if ("activeHighlightField" in partial) activeHighlightField = partial.activeHighlightField;
   if ("isFormDirty" in partial) isFormDirty = partial.isFormDirty;
   if ("editableItems" in partial) editableItems = partial.editableItems;
+  if ("activeReminderTone" in partial) activeReminderTone = partial.activeReminderTone;
 }
 
 export function confirmDiscardIfDirty(
@@ -609,6 +612,139 @@ export function closeGate2ConfirmDialog() {
   el("btn-approve-send")?.focus();
 }
 
+export function openGate3ConfirmDialog() {
+  if (!currentSession || currentSession.flow.stage !== "sent") return false;
+  if (currentSession.paypalInvoice?.status === "PAID") return false;
+  const dialog = el("gate3-confirm-dialog");
+  if (!dialog) return false;
+
+  const d = currentSession.draft;
+  const recipientText = d.recipientName.value
+    ? `${d.recipientName.value} (${d.recipientEmail.value})`
+    : d.recipientEmail.value || "—";
+  const subjectText = (
+    el("input-reminder-subject")?.value ??
+    currentSession.lastDraftedReminder?.subject ??
+    ""
+  ).trim();
+
+  if (el("confirm-remind-recipient")) {
+    el("confirm-remind-recipient").textContent = recipientText;
+  }
+  if (el("confirm-remind-tone")) {
+    el("confirm-remind-tone").textContent =
+      activeReminderTone.charAt(0).toUpperCase() + activeReminderTone.slice(1);
+  }
+  if (el("confirm-remind-subject")) {
+    el("confirm-remind-subject").textContent = subjectText || "Payment Reminder";
+  }
+
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+  return true;
+}
+
+export function closeGate3ConfirmDialog() {
+  const dialog = el("gate3-confirm-dialog");
+  if (!dialog) return;
+  if (typeof dialog.close === "function" && dialog.open) {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+  el("btn-approve-reminder")?.focus();
+}
+
+function renderGate3Card(session) {
+  const card = el("gate3-card");
+  if (!card) return;
+
+  if (session.flow.stage !== "sent") {
+    card.classList.add("hidden");
+    return;
+  }
+  card.classList.remove("hidden");
+
+  const statusBadge = el("gate3-status");
+  const controls = el("gate3-controls");
+  const reasonEl = el("gate3-reason");
+  const btnApprove = el("btn-approve-reminder");
+  const subjInput = el("input-reminder-subject");
+  const noteInput = el("input-reminder-note");
+
+  if (session.lastDraftedReminder) {
+    activeReminderTone = session.lastDraftedReminder.tone || activeReminderTone;
+    if (subjInput && !subjInput.value) {
+      subjInput.value = session.lastDraftedReminder.subject || "";
+    }
+    if (noteInput && !noteInput.value) {
+      noteInput.value = session.lastDraftedReminder.note || "";
+    }
+  }
+
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".tone-tab").forEach((tab) => {
+      const isMatch = tab.getAttribute("data-tone") === activeReminderTone;
+      tab.classList.toggle("active", isMatch);
+      tab.setAttribute("aria-selected", isMatch ? "true" : "false");
+    });
+  }
+
+  const isPaid = session.paypalInvoice?.status === "PAID";
+  const todayUtc = new Date().toISOString().slice(0, 10);
+  const reminders = Array.isArray(session.reminders) ? session.reminders : [];
+  const sentToday = reminders.filter((r) => String(r.sentAt || "").slice(0, 10) === todayUtc).length;
+  const isRateLimited = sentToday >= 2;
+
+  if (isPaid) {
+    if (statusBadge) {
+      statusBadge.textContent = "Invoice Paid";
+      statusBadge.className = "gate-badge approved";
+    }
+    if (controls) controls.classList.add("hidden");
+    if (reasonEl) {
+      reasonEl.textContent = "Invoice is marked PAID. Follow-up reminders are disabled.";
+    }
+  } else {
+    if (controls) controls.classList.remove("hidden");
+    if (btnApprove) btnApprove.disabled = isRateLimited;
+    if (statusBadge) {
+      statusBadge.textContent = isRateLimited
+        ? "Daily Limit Reached (2/2)"
+        : `Ready (${sentToday}/2 Sent Today)`;
+      statusBadge.className = isRateLimited ? "gate-badge" : "gate-badge approved";
+    }
+    if (reasonEl) {
+      reasonEl.textContent = isRateLimited
+        ? "Maximum of 2 reminders per day reached to prevent accidental client spam."
+        : "Rate-limited to a maximum of 2 reminders per day to prevent accidental client spam.";
+    }
+  }
+
+  const histSection = el("reminder-history-section");
+  const histList = el("reminder-history-list");
+  if (histSection && histList) {
+    histList.innerHTML = "";
+    if (reminders.length > 0) {
+      histSection.classList.remove("hidden");
+      reminders.forEach((rec, idx) => {
+        const li = document.createElement("li");
+        li.innerHTML = `<div><strong>#${idx + 1} (${escapeHtml(
+          rec.tone.toUpperCase()
+        )})</strong> • <code>${escapeHtml(rec.sentAt)}</code></div><div>${escapeHtml(
+          rec.subject
+        )}</div>`;
+        histList.appendChild(li);
+      });
+    } else {
+      histSection.classList.add("hidden");
+    }
+  }
+}
+
 export function renderSession(session) {
   currentSession = session;
   isFormDirty = false;
@@ -618,6 +754,7 @@ export function renderSession(session) {
   el("review-empty")?.classList.add("hidden");
   el("review-content")?.classList.remove("hidden");
   closeGate2ConfirmDialog();
+  closeGate3ConfirmDialog();
 
   renderProvenanceDomOnce();
 
@@ -786,6 +923,8 @@ export function renderSession(session) {
       truthCard.classList.add("hidden");
     }
   }
+
+  renderGate3Card(session);
 
   // Technical Details Inspector
   if (el("pre-payload")) {
@@ -1011,6 +1150,72 @@ export async function init() {
       renderSession(updated);
     } catch (err) {
       showError(err.message, "Step 3 • Simulate Payment");
+    }
+  });
+
+  // Gate 3: Tone switcher tabs
+  if (typeof document !== "undefined") {
+    document.querySelectorAll(".tone-tab").forEach((tab) => {
+      tab.addEventListener("click", async () => {
+        if (!currentSession || currentSession.flow.stage !== "sent") return;
+        const tone = tab.getAttribute("data-tone") || "gentle";
+        activeReminderTone = tone;
+        try {
+          showError(null);
+          const drafted = await apiCall(
+            `/api/sessions/${currentSession.id}/remind/draft`,
+            {
+              method: "POST",
+              body: JSON.stringify({ tone }),
+            }
+          );
+          currentSession.lastDraftedReminder = drafted;
+          if (el("input-reminder-subject")) {
+            el("input-reminder-subject").value = drafted.subject || "";
+          }
+          if (el("input-reminder-note")) {
+            el("input-reminder-note").value = drafted.note || "";
+          }
+          renderGate3Card(currentSession);
+        } catch (err) {
+          showError(err.message, "Step 3 • Draft Reminder");
+        }
+      });
+    });
+  }
+
+  // Gate 3 Step A: Open native <dialog> confirmation before sending reminder
+  el("btn-approve-reminder")?.addEventListener("click", () => {
+    openGate3ConfirmDialog();
+  });
+
+  // Gate 3 Step B1: Cancel sending reminder
+  el("btn-cancel-reminder")?.addEventListener("click", () => {
+    closeGate3ConfirmDialog();
+  });
+
+  // Gate 3 Step B2: Confirm & Send Reminder via PayPal
+  el("btn-confirm-reminder")?.addEventListener("click", async () => {
+    if (!currentSession) return;
+    try {
+      closeGate3ConfirmDialog();
+      showError(null);
+      const subject = (el("input-reminder-subject")?.value ?? "").trim();
+      const note = (el("input-reminder-note")?.value ?? "").trim();
+      const updated = await apiCall(
+        `/api/sessions/${currentSession.id}/remind/approve-send`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            subject,
+            note,
+            tone: activeReminderTone,
+          }),
+        }
+      );
+      renderSession(updated);
+    } catch (err) {
+      showError(err.message, "Step 3 • Gate 3 Reminder");
     }
   });
 

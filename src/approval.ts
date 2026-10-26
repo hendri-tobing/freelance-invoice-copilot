@@ -35,3 +35,37 @@ export function recordSent(flow: InvoiceFlow): InvoiceFlow {
   if (!flow.sentApprovedAt) throw new Error("Sending was not approved.");
   return { ...flow, stage: "sent" };
 }
+
+export type ReminderTone = "gentle" | "professional" | "urgent";
+
+export interface ReminderRecord {
+  id?: string;
+  sentAt: string;
+  subject: string;
+  note: string;
+  tone: ReminderTone;
+}
+
+export function canSendReminder(
+  flow: InvoiceFlow,
+  reminderHistory: ReminderRecord[] = [],
+  now: Date = new Date()
+): { allowed: boolean; reason?: string } {
+  if (flow.stage !== "sent" || !flow.paypalInvoiceId) {
+    return {
+      allowed: false,
+      reason: `Cannot send reminder from stage "${flow.stage}". Invoice must be in "sent" stage first.`,
+    };
+  }
+
+  const todayPrefix = now.toISOString().slice(0, 10);
+  const sentToday = reminderHistory.filter((r) => r.sentAt.slice(0, 10) === todayPrefix).length;
+  if (sentToday >= 2) {
+    return {
+      allowed: false,
+      reason: "PayPal enforces a maximum of 2 reminders per day per invoice.",
+    };
+  }
+
+  return { allowed: true };
+}

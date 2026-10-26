@@ -6,12 +6,18 @@ import {
   recordDraftCreated,
   approveSend,
   recordSent,
+  canSendReminder,
+  ReminderTone,
+  ReminderRecord,
 } from "./approval.js";
 import {
   ExtractedInvoiceDraft,
   ExtractedInvoiceDraftSchema,
   formatPayPalInvoiceV2Payload,
   InvoiceItem,
+  ReminderNotification,
+  ReminderNotificationSchema,
+  ReminderToneSchema,
   SourceSpan,
 } from "./schema.js";
 import {
@@ -20,11 +26,17 @@ import {
   normalizeAmountString,
 } from "./extractor.js";
 import { OpenAiExtractionProvider } from "./aiExtractor.js";
+import {
+  DeterministicReminderDrafter,
+  DraftedReminder,
+  OpenAiReminderDrafter,
+  ReminderDrafterProvider,
+} from "./reminderDrafter.js";
 import { loadConfig, PayPalClient } from "./paypal.js";
 
 export class HttpError extends Error {
   constructor(
-    public readonly statusCode: 400 | 404 | 409 | 502,
+    public readonly statusCode: 400 | 404 | 409 | 422 | 429 | 502,
     message: string
   ) {
     super(message);
@@ -59,6 +71,10 @@ export interface PayPalGateway {
     [key: string]: unknown;
   }>;
   sendInvoice(invoiceId: string, sendBody?: unknown): Promise<unknown>;
+  sendInvoiceReminder?(
+    invoiceId: string,
+    notification: ReminderNotification
+  ): Promise<void>;
   simulateBuyerPayment?(invoiceId: string): Promise<void>;
 }
 
@@ -75,6 +91,11 @@ export class RecordedPayPalGateway implements PayPalGateway {
       payload: unknown;
       createdAt: string;
       updatedAt: string;
+      reminders: Array<{
+        subject: string;
+        note: string;
+        sentAt: string;
+      }>;
     }
   >();
   private readonly requestIdMap = new Map<string, string>();
@@ -99,6 +120,7 @@ export class RecordedPayPalGateway implements PayPalGateway {
       payload: invoice,
       createdAt: now,
       updatedAt: now,
+      reminders: [],
     });
     this.requestIdMap.set(requestId, id);
     return {
@@ -157,6 +179,29 @@ export class RecordedPayPalGateway implements PayPalGateway {
     };
   }
 
+  async sendInvoiceReminder(invoiceId: string, notification: ReminderNotification) {
+    const rec = this.store.get(invoiceId);
+    if (!rec) {
+      throw new HttpError(404, `Recorded sandbox invoice not found: ${invoiceId}`);
+    }
+    if (rec.status === "PAID") {
+      throw new HttpError(422, "Cannot send reminder for an invoice that is already PAID.");
+    }
+    if (rec.status !== "SENT") {
+      throw new HttpError(
+        409,
+        `Cannot send reminder for an invoice in status "${rec.status}". Must be SENT first.`
+      );
+    }
+    const now = new Date().toISOString();
+    rec.reminders.push({
+      subject: notification.subject,
+      note: notification.note,
+      sentAt: now,
+    });
+    rec.updatedAt = now;
+  }
+
   async simulateBuyerPayment(invoiceId: string) {
     const rec = this.store.get(invoiceId);
     if (!rec) {
@@ -188,6 +233,8 @@ export interface InvoiceSession {
   unresolvedQuestions: UnresolvedQuestion[];
   formattedPayPalPayload: Record<string, unknown> | null;
   paypalInvoice: PayPalInvoiceRecord | null;
+  reminders: ReminderRecord[];
+  lastDraftedReminder: DraftedReminder | null;
   extractionMode: ExtractionMode;
   paypalMode: PayPalMode;
   createdAt: string;
@@ -267,12 +314,14 @@ export interface WorkflowServiceOptions {
   extractionMode: ExtractionMode;
   paypalMode: PayPalMode;
   invoicerEmail?: string;
+  reminderDrafter?: ReminderDrafterProvider;
 }
 
 export function createWorkflowServiceFromEnv(
   env: NodeJS.ProcessEnv = process.env
 ): InvoiceWorkflowService {
   let extractor: ExtractionProvider;
+  let reminderDrafter: ReminderDrafterProvider;
   let extractionMode: ExtractionMode;
 
   if (env.OPENAI_API_KEY && env.OPENAI_API_KEY.trim().length > 0) {
@@ -281,9 +330,15 @@ export function createWorkflowServiceFromEnv(
       baseURL: env.OPENAI_BASE_URL,
       model: env.OPENAI_MODEL,
     });
+    reminderDrafter = new OpenAiReminderDrafter({
+      apiKey: env.OPENAI_API_KEY.trim(),
+      baseUrl: env.OPENAI_BASE_URL,
+      model: env.OPENAI_MODEL,
+    });
     extractionMode = "live_ai";
   } else {
     extractor = new DeterministicExtractor();
+    reminderDrafter = new DeterministicReminderDrafter();
     extractionMode = "deterministic";
   }
 
@@ -305,6 +360,7 @@ export function createWorkflowServiceFromEnv(
 
   return new InvoiceWorkflowService({
     extractor,
+    reminderDrafter,
     paypal,
     extractionMode,
     paypalMode,
@@ -315,8 +371,11 @@ export function createWorkflowServiceFromEnv(
 export class InvoiceWorkflowService {
   private readonly sessions = new Map<string, InvoiceSession>();
   private readonly inFlightLocks = new Set<string>();
+  private readonly reminderDrafter: ReminderDrafterProvider;
 
-  constructor(private readonly opts: WorkflowServiceOptions) {}
+  constructor(private readonly opts: WorkflowServiceOptions) {
+    this.reminderDrafter = opts.reminderDrafter ?? new DeterministicReminderDrafter();
+  }
 
   public getModes() {
     return {
@@ -350,6 +409,8 @@ export class InvoiceWorkflowService {
       unresolvedQuestions: this.computeQuestions(draft),
       formattedPayPalPayload: this.tryBuildPayload(draft),
       paypalInvoice: null,
+      reminders: [],
+      lastDraftedReminder: null,
       extractionMode: this.opts.extractionMode,
       paypalMode: this.opts.paypalMode,
       createdAt: now,
@@ -596,7 +657,92 @@ export class InvoiceWorkflowService {
 
       session.flow = recordSent(approvedSendFlow);
       session.paypalInvoice = this.normalizePayPalRecord(fetched, sendResult);
+      session.lastDraftedReminder = await this.reminderDrafter.draftReminder({
+        draft: session.draft,
+        tone: "gentle",
+        invoiceId: session.paypalInvoice.id,
+      });
       session.updatedAt = new Date().toISOString();
+      return session;
+    });
+  }
+
+  /**
+   * AI / Deterministic Reminder Drafter: drafts a contextual follow-up subject & note
+   * without sending anything until the user approves Gate 3.
+   */
+  public async draftReminder(
+    sessionId: string,
+    tone: ReminderTone = "gentle"
+  ): Promise<DraftedReminder> {
+    const session = this.getSession(sessionId);
+    const parsedTone = ReminderToneSchema.parse(tone);
+
+    if (session.flow.stage !== "sent" || !session.flow.paypalInvoiceId) {
+      throw new HttpError(
+        409,
+        `Cannot draft a reminder in stage "${session.flow.stage}". The invoice must be sent first.`
+      );
+    }
+    if (session.paypalInvoice?.status === "PAID") {
+      throw new HttpError(409, "Invoice is already PAID; no reminder is needed.");
+    }
+
+    const drafted = await this.reminderDrafter.draftReminder({
+      draft: session.draft,
+      tone: parsedTone,
+      invoiceId: session.flow.paypalInvoiceId,
+    });
+    session.lastDraftedReminder = drafted;
+    session.updatedAt = new Date().toISOString();
+    return drafted;
+  }
+
+  /**
+   * Gate 3: User explicitly approves sending a payment reminder email via PayPal.
+   * Protected by per-session in-flight lock, stage check, PAID status check, and max-2/day rate limit.
+   */
+  public async approveAndSendReminder(
+    sessionId: string,
+    input: { subject: string; note: string; tone?: ReminderTone }
+  ): Promise<InvoiceSession> {
+    const session = this.getSession(sessionId);
+    return this.withSessionLock(sessionId, async () => {
+      if (session.paypalInvoice?.status === "PAID") {
+        throw new HttpError(
+          409,
+          "Cannot send a reminder because this invoice is already PAID."
+        );
+      }
+
+      const gate = canSendReminder(session.flow, session.reminders);
+      if (!gate.allowed) {
+        const isRateLimit = gate.reason?.includes("maximum of 2 reminders");
+        throw new HttpError(isRateLimit ? 429 : 409, gate.reason ?? "Cannot send reminder.");
+      }
+
+      const invoiceId = session.flow.paypalInvoiceId!;
+      const parsedTone = ReminderToneSchema.parse(input.tone ?? "gentle");
+      const notification = ReminderNotificationSchema.parse({
+        subject: input.subject.trim(),
+        note: input.note.trim(),
+        send_to_recipient: true,
+        send_to_invoicer: false,
+      });
+
+      if (this.opts.paypal.sendInvoiceReminder) {
+        await this.opts.paypal.sendInvoiceReminder(invoiceId, notification);
+      }
+
+      const record: ReminderRecord = {
+        id: randomUUID(),
+        sentAt: new Date().toISOString(),
+        tone: parsedTone,
+        subject: notification.subject,
+        note: notification.note,
+      };
+      session.reminders.push(record);
+      session.updatedAt = record.sentAt;
       return session;
     });
   }

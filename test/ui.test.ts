@@ -12,6 +12,8 @@ import {
   setActiveHighlightField,
   openGate2ConfirmDialog,
   closeGate2ConfirmDialog,
+  openGate3ConfirmDialog,
+  closeGate3ConfirmDialog,
 } from "../public/app.js";
 
 function createService() {
@@ -321,6 +323,77 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
       expect(modalClosed).toBe(true);
       expect(dialogMock.open).toBe(false);
       expect(triggerFocused).toBe(true);
+    } finally {
+      globalThis.document = origDocument;
+    }
+  });
+
+  it("openGate3ConfirmDialog and closeGate3ConfirmDialog operate native <dialog> when invoice is SENT and block when PAID", async () => {
+    const proposed = await workflow.createSessionFromText(
+      "Client: Jordan Patel <jordan@brightwave.io>\n1. Audit: $400 USD\nNet 14."
+    );
+    await workflow.approveAndCreateDraft(proposed.id);
+    const sentSession = await workflow.approveAndSendInvoice(proposed.id);
+
+    let modalOpened = false;
+    let modalClosed = false;
+    let triggerFocused = false;
+
+    const dialogMock = {
+      open: false,
+      showModal() {
+        modalOpened = true;
+        this.open = true;
+      },
+      close() {
+        modalClosed = true;
+        this.open = false;
+      },
+    };
+    const recipientEl = { textContent: "" };
+    const toneEl = { textContent: "" };
+    const subjectEl = { textContent: "" };
+    const subjectInputEl = { value: "Friendly check-in: Invoice INV2-SIM" };
+    const remindBtnMock = {
+      focus() {
+        triggerFocused = true;
+      },
+    };
+
+    const origDocument = globalThis.document;
+    globalThis.document = {
+      getElementById(id: string) {
+        if (id === "gate3-confirm-dialog") return dialogMock;
+        if (id === "confirm-remind-recipient") return recipientEl;
+        if (id === "confirm-remind-tone") return toneEl;
+        if (id === "confirm-remind-subject") return subjectEl;
+        if (id === "input-reminder-subject") return subjectInputEl;
+        if (id === "btn-approve-reminder") return remindBtnMock;
+        return null;
+      },
+    } as unknown as Document;
+
+    try {
+      setUiStateForTest({
+        currentSession: sentSession,
+        activeReminderTone: "urgent",
+      });
+
+      const opened = openGate3ConfirmDialog();
+      expect(opened).toBe(true);
+      expect(modalOpened).toBe(true);
+      expect(recipientEl.textContent).toContain("jordan@brightwave.io");
+      expect(toneEl.textContent).toBe("Urgent");
+      expect(subjectEl.textContent).toBe("Friendly check-in: Invoice INV2-SIM");
+
+      closeGate3ConfirmDialog();
+      expect(modalClosed).toBe(true);
+      expect(triggerFocused).toBe(true);
+
+      // Simulate buyer payment -> openGate3ConfirmDialog must return false when PAID
+      const paidSession = await workflow.simulateSandboxPayment(sentSession.id);
+      setUiStateForTest({ currentSession: paidSession });
+      expect(openGate3ConfirmDialog()).toBe(false);
     } finally {
       globalThis.document = origDocument;
     }

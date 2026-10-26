@@ -9,6 +9,7 @@ import {
   InvoiceWorkflowService,
   SAMPLE_SCENARIOS,
 } from "./workflow.js";
+import { ReminderTone } from "./approval.js";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PUBLIC_DIR = resolve(__dirname, "../public");
@@ -109,6 +110,33 @@ export function createAppServer(
 
         if (method === "POST" && action === "simulate-pay") {
           const session = await workflow.simulateSandboxPayment(sessionId);
+          return sendJson(res, 200, session);
+        }
+      }
+
+      // 3b. Gate 3 Reminder routes: /api/sessions/:id/remind/(draft|approve-send)
+      const remindMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/remind\/(draft|approve-send)$/);
+      if (remindMatch && method === "POST") {
+        const sessionId = decodeURIComponent(remindMatch[1]);
+        const remindAction = remindMatch[2];
+
+        if (remindAction === "draft") {
+          const body = await readJsonBody<{ tone?: ReminderTone }>(req);
+          const drafted = await workflow.draftReminder(sessionId, body.tone ?? "gentle");
+          return sendJson(res, 200, drafted);
+        }
+
+        if (remindAction === "approve-send") {
+          const body = await readJsonBody<{
+            subject?: string;
+            note?: string;
+            tone?: ReminderTone;
+          }>(req);
+          const session = await workflow.approveAndSendReminder(sessionId, {
+            subject: body.subject ?? "",
+            note: body.note ?? "",
+            tone: body.tone ?? "gentle",
+          });
           return sendJson(res, 200, session);
         }
       }
