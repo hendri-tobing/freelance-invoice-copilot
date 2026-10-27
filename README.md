@@ -72,9 +72,9 @@ When credentials are provided, the header badges in the Web UI automatically swi
 | --- | --- |
 | `npm start` | Starts the Web UI and guarded HTTP API server on `http://127.0.0.1:3000` |
 | `npm run dev` | Starts the server in watch mode |
-| `npm test` | Runs all 8 Vitest unit, UI & integration test suites (`approval`, `extractor`, `aiExtractor`, `reminderDrafter`, `paypal`, `workflow`, `server`, `ui`) |
+| `npm test` | Runs all 8 Vitest unit, UI & integration test suites across extraction, three-gate approval, reminder drafting, PayPal client, workflow, server, and UI |
 | `npm run typecheck` | Runs `tsc -p .` static type checking |
-| `npm run demo` | Interactive terminal CLI walkthrough of extraction + two-step approval |
+| `npm run demo` | Interactive terminal CLI walkthrough of extraction + three-gate approval lifecycle (Gate 1 Draft, Gate 2 Send, Gate 3 Reminder) |
 | `npm run spike` | Live PayPal Sandbox round-trip script: create draft &rarr; fetch &rarr; send (requires sandbox credentials) |
 | `npm run status -- <invoice_id>` | Read-only status fetch for a PayPal Sandbox invoice ID |
 
@@ -105,6 +105,7 @@ test/
   approval.test.ts
   extractor.test.ts
   aiExtractor.test.ts
+  reminderDrafter.test.ts
   paypal.test.ts
   workflow.test.ts
   server.test.ts

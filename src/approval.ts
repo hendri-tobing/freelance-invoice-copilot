@@ -38,6 +38,8 @@ export function recordSent(flow: InvoiceFlow): InvoiceFlow {
 
 export type ReminderTone = "gentle" | "professional" | "urgent";
 
+export const MAX_REMINDERS_PER_DAY = 2;
+
 export interface ReminderRecord {
   id?: string;
   sentAt: string;
@@ -60,10 +62,10 @@ export function canSendReminder(
 
   const todayPrefix = now.toISOString().slice(0, 10);
   const sentToday = reminderHistory.filter((r) => r.sentAt.slice(0, 10) === todayPrefix).length;
-  if (sentToday >= 2) {
+  if (sentToday >= MAX_REMINDERS_PER_DAY) {
     return {
       allowed: false,
-      reason: "PayPal enforces a maximum of 2 reminders per day per invoice.",
+      reason: `PayPal enforces a maximum of ${MAX_REMINDERS_PER_DAY} reminders per day per invoice.`,
     };
   }
 

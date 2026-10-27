@@ -1,4 +1,5 @@
 import * as readline from "node:readline";
+import { MAX_REMINDERS_PER_DAY, ReminderTone } from "../src/approval.js";
 import { DeterministicExtractor } from "../src/extractor.js";
 import { InvoiceWorkflowService, RecordedPayPalGateway } from "../src/workflow.js";
 
@@ -12,6 +13,13 @@ function prompt(rl: readline.Interface, question: string): Promise<string> {
   return new Promise((resolve) => rl.question(question, resolve));
 }
 
+function parseToneChoice(input: string): ReminderTone {
+  const val = input.trim().toLowerCase();
+  if (val === "2" || val === "professional") return "professional";
+  if (val === "3" || val === "urgent") return "urgent";
+  return "gentle";
+}
+
 async function runCli() {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -19,7 +27,7 @@ async function runCli() {
   });
 
   console.log("==================================================");
-  console.log("   FREELANCE INVOICE COPILOT — LOCAL CLI DEMO     ");
+  console.log("FREELANCE INVOICE COPILOT — LOCAL CLI DEMO");
   console.log("==================================================\n");
 
   console.log("1. Input Sample Freelancer Chat / Note:");
@@ -84,7 +92,62 @@ async function runCli() {
     `✓ Invoice sent! Stage: ${session.flow.stage} (PayPal Status: ${session.paypalInvoice?.status})`
   );
   console.log(`  Hosted Payer URL: ${session.paypalInvoice?.recipientViewUrl}`);
-  console.log("\nAll actions respected the two-step human approval boundary.");
+
+  // Gate 3: Follow-up & Reminder Copilot
+  console.log("\n4. Follow-up & Reminder Copilot (Gate 3):");
+  console.log("---------------------------------------");
+  const toneInput = await prompt(
+    rl,
+    "Choose reminder tone [1=gentle (default), 2=professional, 3=urgent]: "
+  );
+  const selectedTone = parseToneChoice(toneInput);
+  const draftedReminder = await workflow.draftReminder(session.id, selectedTone);
+
+  console.log("\n[Drafted Reminder Preview]");
+  console.log(`- Recipient: ${draft.recipientName.value ?? "Client"} <${draft.recipientEmail.value}>`);
+  console.log(`- Tone:      ${draftedReminder.tone}`);
+  console.log(`- Subject:   ${draftedReminder.subject}`);
+  console.log(`- Note:      ${draftedReminder.note}`);
+
+  let reminderOutcome = "skipped";
+  const ansRemind = await prompt(
+    rl,
+    `\n[GATE 3] Approve sending this reminder email to ${draft.recipientEmail.value}? (y/N): `
+  );
+  if (ansRemind.trim().toLowerCase() === "y") {
+    session = await workflow.approveAndSendReminder(session.id, {
+      subject: draftedReminder.subject,
+      note: draftedReminder.note,
+      tone: selectedTone,
+    });
+    reminderOutcome = `sent (${session.reminders.length}/${MAX_REMINDERS_PER_DAY} daily limit)`;
+    console.log(
+      `✓ Reminder sent! Reminders used today: ${session.reminders.length}/${MAX_REMINDERS_PER_DAY}.`
+    );
+  } else {
+    console.log("✓ Reminder skipped by user.");
+  }
+
+  // Optional Sandbox Buyer Payment Simulation (clearly labeled outside the approval gates)
+  let paymentOutcome = "not simulated (invoice remains SENT)";
+  const ansPay = await prompt(
+    rl,
+    "\n[SANDBOX SIMULATION] Simulate the buyer paying this invoice now? (y/N): "
+  );
+  if (ansPay.trim().toLowerCase() === "y") {
+    session = await workflow.simulateSandboxPayment(session.id);
+    paymentOutcome = "simulated (invoice is now PAID)";
+    console.log(`✓ Payment recorded! PayPal Invoice Status: ${session.paypalInvoice?.status}`);
+    console.log(
+      "✓ Follow-up reminders are now locked because this invoice has been paid in full."
+    );
+  } else {
+    console.log("✓ Payment simulation skipped; invoice remains SENT.");
+  }
+
+  console.log(
+    `\n✓ Demo complete — Draft: created | Invoice: sent | Gate 3 Reminder: ${reminderOutcome} | Buyer Payment: ${paymentOutcome}.`
+  );
   rl.close();
 }
 
