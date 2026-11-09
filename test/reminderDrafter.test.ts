@@ -17,7 +17,7 @@ describe("ReminderDrafter — Context-Aware Reminder Generation", () => {
     const extractor = new DeterministicExtractor();
     const draft = await extractor.extractInvoice(
       [
-        "Client: Jordan Patel <jordan@brightwave.test>",
+        "Client: Kofi Nowakowski <kofi@brightwave.test>",
         "1. Discovery & UX Audit: $400 USD",
         "2. Design System Kit: $800 USD",
         "Payment terms: Net 14.",
@@ -33,7 +33,7 @@ describe("ReminderDrafter — Context-Aware Reminder Generation", () => {
     });
     expect(gentle.tone).toBe("gentle");
     expect(gentle.subject).toMatch(/friendly|reminder|INV2-SIM-1001/i);
-    expect(gentle.note).toContain("Jordan Patel");
+    expect(gentle.note).toContain("Kofi Nowakowski");
     expect(gentle.note).toContain("Discovery & UX Audit");
     expect(gentle.note).toContain("USD 1200.00");
 

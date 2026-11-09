@@ -156,7 +156,7 @@ describe("PayPalClient REST implementation against mock sandbox responses", () =
 
     const notification = {
       subject: "Gentle reminder: Invoice INV2-DRAFT-9999",
-      note: "Hi Jordan, quick check-in on the invoice.",
+      note: "Hi Kofi, quick check-in on the invoice.",
       send_to_invoicer: true,
       send_to_recipient: true,
       additional_recipients: [],

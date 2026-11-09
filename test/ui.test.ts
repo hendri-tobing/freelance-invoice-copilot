@@ -42,7 +42,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
   it("removes line item 1 of 2 and preserves line item 2 provenance through buildPatchFromForm -> workflow.updateDraft", async () => {
     const session = await workflow.createSessionFromText(
       [
-        "Client: Jordan Patel <jordan@brightwave.io>",
+        "Client: Kofi Nowakowski <kofi@brightwave.io>",
         "1. Discovery & UX Audit: $400 USD",
         "2. Design System Kit: $800 USD",
         "Payment terms: Net 14.",
@@ -89,7 +89,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
   it("clears sourceSpan and resolves item ambiguity when user edits an unparsed list item price", async () => {
     const session = await workflow.createSessionFromText(
       [
-        "Client: Jordan Patel <jordan@brightwave.io>",
+        "Client: Kofi Nowakowski <kofi@brightwave.io>",
         "1. Discovery & UX Audit: $400 USD",
         "2. Revisions: included",
         "Payment terms: Net 14.",
@@ -131,7 +131,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
 
   it("dirty guard confirmDiscardIfDirty blocks Step 1 scenario/extract replacement when user cancels", async () => {
     const session = await workflow.createSessionFromText(
-      "Client: Jordan Patel <jordan@brightwave.io>\n1. Audit: $400 USD\nNet 14."
+      "Client: Kofi Nowakowski <kofi@brightwave.io>\n1. Audit: $400 USD\nNet 14."
     );
 
     setUiStateForTest({
@@ -182,7 +182,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
 
   it("setActiveHighlightField toggles .active class on <mark> elements in-place without replacing innerHTML", async () => {
     const session = await workflow.createSessionFromText(
-      "Client: Jordan Patel <jordan@brightwave.io>\n1. Audit: $400 USD\nNet 14."
+      "Client: Kofi Nowakowski <kofi@brightwave.io>\n1. Audit: $400 USD\nNet 14."
     );
 
     // Create minimal mock DOM for #highlighted-source and #active-span-meta
@@ -244,7 +244,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
       expect(innerHtmlWriteCount).toBe(0);
       expect(emailMark.active).toBe(true);
       expect(itemMark.active).toBe(false);
-      expect(metaMock.textContent).toContain("jordan@brightwave.io");
+      expect(metaMock.textContent).toContain("kofi@brightwave.io");
 
       setActiveHighlightField("items");
       expect(innerHtmlWriteCount).toBe(0);
@@ -257,7 +257,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
 
   it("openGate2ConfirmDialog and closeGate2ConfirmDialog operate native <dialog> via showModal() and close()", async () => {
     const proposedSession = await workflow.createSessionFromText(
-      "Client: Jordan Patel <jordan@brightwave.io>\n1. Audit: $400 USD\nNet 14."
+      "Client: Kofi Nowakowski <kofi@brightwave.io>\n1. Audit: $400 USD\nNet 14."
     );
     const session = await workflow.approveAndCreateDraft(proposedSession.id);
 
@@ -315,7 +315,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
       openGate2ConfirmDialog();
       expect(modalOpened).toBe(true);
       expect(dialogMock.open).toBe(true);
-      expect(recipientEl.textContent).toContain("jordan@brightwave.io");
+      expect(recipientEl.textContent).toContain("kofi@brightwave.io");
       expect(amountEl.textContent).toContain("USD $400.00");
       expect(termsEl.textContent).toBe("Net 14 (14 days)");
 
@@ -330,7 +330,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
 
   it("openGate3ConfirmDialog and closeGate3ConfirmDialog operate native <dialog> when invoice is SENT and block when PAID", async () => {
     const proposed = await workflow.createSessionFromText(
-      "Client: Jordan Patel <jordan@brightwave.io>\n1. Audit: $400 USD\nNet 14."
+      "Client: Kofi Nowakowski <kofi@brightwave.io>\n1. Audit: $400 USD\nNet 14."
     );
     await workflow.approveAndCreateDraft(proposed.id);
     const sentSession = await workflow.approveAndSendInvoice(proposed.id);
@@ -382,7 +382,7 @@ describe("Frontend UI Controller Behavior (public/app.js)", () => {
       const opened = openGate3ConfirmDialog();
       expect(opened).toBe(true);
       expect(modalOpened).toBe(true);
-      expect(recipientEl.textContent).toContain("jordan@brightwave.io");
+      expect(recipientEl.textContent).toContain("kofi@brightwave.io");
       expect(toneEl.textContent).toBe("Urgent");
       expect(subjectEl.textContent).toBe("Friendly check-in: Invoice INV2-SIM");
 

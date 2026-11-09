@@ -167,7 +167,7 @@ describe("HTTP API & Web UI Server (src/server.ts)", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         rawText: [
-          "Client: Jordan Patel <jordan@brightwave.io>",
+          "Client: Kofi Nowakowski <kofi@brightwave.io>",
           "1. Discovery & UX Audit: $400 USD",
           "2. Design System Kit: $800 USD",
           "3. Revisions: included",

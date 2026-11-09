@@ -3,7 +3,7 @@ import { MAX_REMINDERS_PER_DAY, ReminderTone } from "../src/approval.js";
 import { DeterministicExtractor } from "../src/extractor.js";
 import { InvoiceWorkflowService, RecordedPayPalGateway } from "../src/workflow.js";
 
-const sampleChat = `Client: Jordan Patel <jordan@brightwave.test>
+const sampleChat = `Client: Kofi Nowakowski <kofi@brightwave.test>
 Approved deliverables for BrightWave web relaunch:
 1. Discovery & UX Audit: $400 USD
 2. Responsive Webflow Implementation: $850 USD
